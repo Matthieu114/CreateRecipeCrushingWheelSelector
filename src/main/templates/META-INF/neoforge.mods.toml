@@ -1,0 +1,33 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="crushingwheelrecipeselector"
+version="1.0.0"
+displayName="Crushing Wheel Recipe Selector"
+description='''
+Allows you to choose which output you want from Create's crushing wheels when multiple mods add conflicting recipes.
+'''
+authors="EnormeBoze"
+
+[[dependencies.crushingwheelrecipeselector]]
+modId="neoforge"
+type="required"
+versionRange="[21.1,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.crushingwheelrecipeselector]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1,1.22)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.crushingwheelrecipeselector]]
+modId="create"
+type="required"
+versionRange="[0.6.0,)"
+ordering="AFTER"
+side="BOTH"
