@@ -101,6 +101,13 @@ public class CrushingWheelSelections extends SavedData {
         }
     }
 
+    /**
+     * Alias for clearSelection for consistency with setPreferredRecipe
+     */
+    public void clearPreferredRecipe(BlockPos wheelPos, String inputItemId) {
+        clearSelection(wheelPos, inputItemId);
+    }
+
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
         ListTag wheelsList = new ListTag();

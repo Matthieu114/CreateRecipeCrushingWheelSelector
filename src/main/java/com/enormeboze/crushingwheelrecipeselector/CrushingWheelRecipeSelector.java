@@ -1,31 +1,29 @@
 package com.enormeboze.crushingwheelrecipeselector;
 
+import com.enormeboze.crushingwheelrecipeselector.network.ModNetworking;
+import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-@Mod("crushingwheelrecipeselector")
+@Mod(CrushingWheelRecipeSelector.MOD_ID)
 public class CrushingWheelRecipeSelector {
 
     public static final String MOD_ID = "crushingwheelrecipeselector";
-    public static final Logger LOGGER = LoggerFactory.getLogger(CrushingWheelRecipeSelector.class);
+    public static final Logger LOGGER = LogUtils.getLogger();
 
     public CrushingWheelRecipeSelector(IEventBus modEventBus, ModContainer modContainer) {
-        LOGGER.info("Crushing Recipe Selector is initializing...");
-
-        // Register the common setup method
-        modEventBus.addListener(this::commonSetup);
-
-        // Initialize config
-        Config.init();
-
-        LOGGER.info("Crushing Recipe Selector initialized!");
+        LOGGER.info("Initializing Crushing Wheel Recipe Selector");
+        
+        // Register network packets
+        modEventBus.addListener(this::onRegisterPayloadHandlers);
+        
+        LOGGER.info("Crushing Wheel Recipe Selector initialized");
     }
 
-    private void commonSetup(final FMLCommonSetupEvent event) {
-        LOGGER.info("Common setup complete!");
+    private void onRegisterPayloadHandlers(RegisterPayloadHandlersEvent event) {
+        ModNetworking.register(event);
     }
 }
