@@ -2,7 +2,6 @@ package com.enormeboze.crushingwheelrecipeselector.network;
 
 import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
 import net.neoforged.bus.api.IEventBus;
-import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
@@ -41,6 +40,27 @@ public class ModNetworking {
                 SyncSelectionsPacket.TYPE,
                 SyncSelectionsPacket.STREAM_CODEC,
                 SyncSelectionsPacket::handleSyncSelections
+        );
+
+        // Server -> Client: Start linking (show highlights)
+        registrar.playToClient(
+                StartLinkingPacket.TYPE,
+                StartLinkingPacket.STREAM_CODEC,
+                StartLinkingPacket::handle
+        );
+
+        // Server -> Client: Cancel linking (clear highlights)
+        registrar.playToClient(
+                CancelLinkingPacket.TYPE,
+                CancelLinkingPacket.STREAM_CODEC,
+                CancelLinkingPacket::handle
+        );
+
+        // Server -> Client: Link result (success/error particles)
+        registrar.playToClient(
+                LinkResultPacket.TYPE,
+                LinkResultPacket.STREAM_CODEC,
+                LinkResultPacket::handle
         );
 
         CrushingWheelRecipeSelector.LOGGER.info("Network packets registered");

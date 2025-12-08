@@ -1,6 +1,9 @@
 package com.enormeboze.crushingwheelrecipeselector;
 
 import com.enormeboze.crushingwheelrecipeselector.network.SyncSelectionsPacket;
+import com.enormeboze.crushingwheelrecipeselector.network.StartLinkingPacket;
+import com.enormeboze.crushingwheelrecipeselector.network.CancelLinkingPacket;
+import com.enormeboze.crushingwheelrecipeselector.network.LinkResultPacket;
 import com.simibubi.create.content.kinetics.crusher.CrushingWheelBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -17,6 +20,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -67,12 +71,15 @@ public class WrenchHandler {
         // Cancel default wrench behavior (rotation)
         event.setCanceled(true);
 
-        // Handle on server side for linking logic
+        // Handle on server side only - server sends packets to client for visuals
         if (!level.isClientSide()) {
             handleWrenchInteraction(player, pos, level);
         }
     }
 
+    /**
+     * Server-side: Handle actual linking logic
+     */
     private static void handleWrenchInteraction(Player player, BlockPos clickedPos, Level level) {
         UUID playerId = player.getUUID();
 
@@ -80,7 +87,7 @@ public class WrenchHandler {
         CrushingWheelSelections selections = CrushingWheelSelections.get(level);
 
         // Check if this wheel is already linked
-        boolean isLinked = selections.isWheelLinked(clickedPos);
+        boolean isLinked = selections != null && selections.isWheelLinked(clickedPos);
 
         // Check if player has a pending link
         BlockPos pendingPos = pendingLinks.get(playerId);
@@ -89,26 +96,64 @@ public class WrenchHandler {
             // Player is completing a link
             if (pendingPos.equals(clickedPos)) {
                 // Clicked same wheel - cancel linking
-                pendingLinks.remove(playerId);
-                player.displayClientMessage(Component.literal("§cLinking cancelled"), true);
-                CrushingWheelRecipeSelector.LOGGER.debug("Player {} cancelled linking", player.getName().getString());
+                cancelLink(player);
             } else {
-                // Complete the link between two wheels
-                completeLink(player, pendingPos, clickedPos, level, selections);
+                // Try to complete the link between two wheels
+                tryCompleteLink(player, pendingPos, clickedPos, level, selections);
             }
         } else if (isLinked) {
             // Wheel is already linked - open GUI
             openGui(player, clickedPos);
         } else {
             // Start linking process
-            startLink(player, clickedPos);
+            startLink(player, clickedPos, level);
         }
     }
 
-    private static void startLink(Player player, BlockPos pos) {
+    private static void startLink(Player player, BlockPos pos, Level level) {
         pendingLinks.put(player.getUUID(), pos);
         player.displayClientMessage(Component.literal("§eSelect second crushing wheel to link..."), true);
         CrushingWheelRecipeSelector.LOGGER.debug("Player {} started linking at {}", player.getName().getString(), pos);
+
+        // Send packet to client to start highlighting
+        if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+            Set<BlockPos> nearbyWheels = WheelLinkingHelper.findNearbyWheels(level, pos);
+            PacketDistributor.sendToPlayer(serverPlayer, new StartLinkingPacket(pos, nearbyWheels));
+        }
+    }
+
+    private static void cancelLink(Player player) {
+        pendingLinks.remove(player.getUUID());
+        player.displayClientMessage(Component.literal("§cLinking cancelled"), true);
+        CrushingWheelRecipeSelector.LOGGER.debug("Player {} cancelled linking", player.getName().getString());
+
+        // Send packet to client to clear highlighting
+        if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+            PacketDistributor.sendToPlayer(serverPlayer, new CancelLinkingPacket());
+        }
+    }
+
+    private static void tryCompleteLink(Player player, BlockPos firstPos, BlockPos secondPos, Level level, CrushingWheelSelections selections) {
+        // Check distance
+        if (!WheelLinkingHelper.isWithinLinkDistance(firstPos, secondPos)) {
+            // Too far apart - cancel linking
+            pendingLinks.remove(player.getUUID());
+
+            String distance = WheelLinkingHelper.getDistanceDescription(firstPos, secondPos);
+            player.displayClientMessage(Component.literal("§cWheels are too far apart! (" + distance + ") Maximum distance is " + WheelLinkingHelper.MAX_LINK_DISTANCE + " blocks."), true);
+            CrushingWheelRecipeSelector.LOGGER.debug("Player {} tried to link wheels that are too far apart: {} to {} ({})",
+                    player.getName().getString(), firstPos, secondPos, distance);
+
+            // Send error particles and clear highlighting
+            if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+                PacketDistributor.sendToPlayer(serverPlayer, new LinkResultPacket(false, secondPos, secondPos));
+            }
+
+            return;
+        }
+
+        // Distance OK - complete the link
+        completeLink(player, firstPos, secondPos, level, selections);
     }
 
     private static void completeLink(Player player, BlockPos firstPos, BlockPos secondPos, Level level, CrushingWheelSelections selections) {
@@ -124,6 +169,11 @@ public class WrenchHandler {
         player.displayClientMessage(Component.literal("§aCrushing wheels linked! Right-click to configure recipes."), true);
         CrushingWheelRecipeSelector.LOGGER.info("Player {} linked wheels at {} and {} with group {}",
                 player.getName().getString(), firstPos, secondPos, groupId);
+
+        // Send success particles and clear highlighting
+        if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+            PacketDistributor.sendToPlayer(serverPlayer, new LinkResultPacket(true, firstPos, secondPos));
+        }
     }
 
     private static void openGui(Player player, BlockPos wheelPos) {
@@ -139,6 +189,8 @@ public class WrenchHandler {
             PacketDistributor.sendToPlayer(serverPlayer,
                     new SyncSelectionsPacket(wheelPos, prefs, true));
 
+            CrushingWheelRecipeSelector.LOGGER.debug("Sent GUI open packet to player {} for wheel at {}",
+                    player.getName().getString(), wheelPos);
         }
     }
 
@@ -171,5 +223,12 @@ public class WrenchHandler {
      */
     public static boolean hasPendingLink(UUID playerId) {
         return pendingLinks.containsKey(playerId);
+    }
+
+    /**
+     * Get pending link position for a player
+     */
+    public static BlockPos getPendingLink(UUID playerId) {
+        return pendingLinks.get(playerId);
     }
 }
