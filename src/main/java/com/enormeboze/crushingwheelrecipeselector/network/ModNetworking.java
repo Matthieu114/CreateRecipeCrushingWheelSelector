@@ -1,124 +1,48 @@
 package com.enormeboze.crushingwheelrecipeselector.network;
 
 import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
-import com.enormeboze.crushingwheelrecipeselector.CrushingWheelSelections;
-import com.enormeboze.crushingwheelrecipeselector.client.ClientSelectionCache;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
-// ------------------------------------
-// REQUIRED IMPORTS TO FIX YOUR ERRORS
-import net.minecraft.core.BlockPos; // FIX 1: Cannot resolve symbol 'BlockPos'
-import net.minecraft.client.Minecraft; // Needed for client screen access
-import com.enormeboze.crushingwheelrecipeselector.client.RecipeSelectorScreen; // Needed for client screen access
-// ------------------------------------
-
-/**
- * Handles network packet registration and packet handling
- */
 public class ModNetworking {
 
-    /**
-     * Register all network packets
-     */
-    public static void register(RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar registrar = event.registrar("1");
+    public static void register(IEventBus modEventBus) {
+        modEventBus.addListener(ModNetworking::registerPayloads);
+    }
 
-        // Register select recipe packet (client -> server)
+    private static void registerPayloads(RegisterPayloadHandlersEvent event) {
+        PayloadRegistrar registrar = event.registrar(CrushingWheelRecipeSelector.MOD_ID);
+
+        // Client -> Server: Request to open GUI
+        registrar.playToServer(
+                RequestOpenGuiPacket.TYPE,
+                RequestOpenGuiPacket.STREAM_CODEC,
+                RequestOpenGuiPacket::handle
+        );
+
+        // Client -> Server: Select a recipe
         registrar.playToServer(
                 SelectRecipePacket.TYPE,
                 SelectRecipePacket.STREAM_CODEC,
-                ModNetworking::handleSelectRecipe
+                SelectRecipePacket::handle
         );
 
-        // Register clear recipe packet (client -> server)
+        // Client -> Server: Clear a recipe selection
         registrar.playToServer(
                 ClearRecipePacket.TYPE,
                 ClearRecipePacket.STREAM_CODEC,
-                ModNetworking::handleClearRecipe
+                ClearRecipePacket::handle
         );
 
-        // Register sync selections packet (server -> client)
+        // Server -> Client: Sync selections (and optionally open GUI)
         registrar.playToClient(
                 SyncSelectionsPacket.TYPE,
                 SyncSelectionsPacket.STREAM_CODEC,
-                ModNetworking::handleSyncSelections
+                SyncSelectionsPacket::handleSyncSelections
         );
+
+        CrushingWheelRecipeSelector.LOGGER.info("Network packets registered");
     }
-
-    /**
-     * Handle SelectRecipePacket on the server
-     */
-    private static void handleSelectRecipe(SelectRecipePacket packet, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            if (context.player() instanceof ServerPlayer serverPlayer) {
-                ServerLevel level = serverPlayer.serverLevel();
-
-                // Get the selections data
-                CrushingWheelSelections selections = CrushingWheelSelections.get(level);
-
-                // Set the selection for this item at this wheel (which is handled by the group ID now)
-                selections.setPreferredRecipe(
-                        packet.wheelPosition(),
-                        packet.inputItemId(),
-                        packet.recipeId()
-                );
-
-                CrushingWheelRecipeSelector.LOGGER.info(
-                        "Player {} set recipe {} for item {} at wheel {}",
-                        serverPlayer.getName().getString(),
-                        packet.recipeId(),
-                        packet.inputItemId(),
-                        packet.wheelPosition()
-                );
-            }
-        });
-    }
-
-    /**
-     * Handle ClearRecipePacket on the server
-     */
-    private static void handleClearRecipe(ClearRecipePacket packet, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            if (context.player() instanceof ServerPlayer serverPlayer) {
-                ServerLevel level = serverPlayer.serverLevel();
-
-                // Get the selections data
-                CrushingWheelSelections selections = CrushingWheelSelections.get(level);
-
-                // Clear the selection for this item at this wheel
-                selections.clearPreferredRecipe(packet.wheelPosition(), packet.inputItemId());
-
-                CrushingWheelRecipeSelector.LOGGER.info(
-                        "Player {} cleared recipe selection for item {} at wheel {}",
-                        serverPlayer.getName().getString(),
-                        packet.inputItemId(),
-                        packet.wheelPosition()
-                );
-            }
-        });
-    }
-
-    /**
-     * Handle SyncSelectionsPacket on the client
-     */
-    private static void handleSyncSelections(SyncSelectionsPacket packet, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            // Update client-side cache with synced selections
-            ClientSelectionCache.updateSelections(packet.wheelPosition(), packet.selections());
-
-            CrushingWheelRecipeSelector.LOGGER.info(
-                    "Received {} selections for wheel at {}. Opening GUI.",
-                    packet.selections().size(),
-                    packet.wheelPosition()
-            );
-
-            // Open the GUI
-            com.enormeboze.crushingwheelrecipeselector.client.ClientScreenHelper.openRecipeSelectorScreen(packet.wheelPosition());
-        });
-    }
-
 }
