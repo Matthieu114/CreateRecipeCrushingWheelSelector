@@ -67,8 +67,10 @@ public class RecipeHandler {
 
                         for (ItemStack item : items) {
                             String itemId = getItemId(item);
+                            @SuppressWarnings("unchecked")
+                            RecipeHolder<CrushingRecipe> typedHolder = (RecipeHolder<CrushingRecipe>) recipeHolder;
                             crushingRecipesByInput.computeIfAbsent(itemId, k -> new ArrayList<>())
-                                    .add((RecipeHolder<CrushingRecipe>) recipeHolder);
+                                    .add(typedHolder);
                         }
                     }
                 } catch (Exception e) {
@@ -174,7 +176,7 @@ public class RecipeHandler {
     }
 
     private static String getItemId(ItemStack stack) {
-        ResourceLocation registryName = stack.getItem().builtInRegistryHolder().key().location();
+        ResourceLocation registryName = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
         return registryName.toString();
     }
 

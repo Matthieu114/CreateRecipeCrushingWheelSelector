@@ -10,7 +10,9 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -46,9 +48,9 @@ public class CrushingWheelSelections extends SavedData {
     }
 
     /**
-     * Unlink a wheel (called when wheel is broken)
+     * Unlink a wheel (internal method, doesn't affect pair)
      */
-    public void unlinkWheel(BlockPos pos) {
+    private void unlinkWheelInternal(BlockPos pos) {
         UUID groupId = wheelGroups.remove(pos);
         if (groupId != null) {
             // Check if any other wheels still use this group
@@ -57,6 +59,35 @@ public class CrushingWheelSelections extends SavedData {
                 groupPreferences.remove(groupId);
             }
             setDirty();
+        }
+    }
+
+    /**
+     * Unlink a wheel and its pair (called when wheel is broken)
+     * Both wheels in a pair must be unlinked when one is broken
+     */
+    public void unlinkWheel(BlockPos pos) {
+        UUID groupId = wheelGroups.get(pos);
+        if (groupId != null) {
+            // Find and unlink ALL wheels in this group (the pair)
+            List<BlockPos> wheelsInGroup = new ArrayList<>();
+            for (Map.Entry<BlockPos, UUID> entry : wheelGroups.entrySet()) {
+                if (entry.getValue().equals(groupId)) {
+                    wheelsInGroup.add(entry.getKey());
+                }
+            }
+
+            // Remove all wheels from this group
+            for (BlockPos wheelPos : wheelsInGroup) {
+                wheelGroups.remove(wheelPos);
+                CrushingWheelRecipeSelector.LOGGER.debug("Unlinked wheel at {} (group {} dissolved)", wheelPos, groupId);
+            }
+
+            // Remove the group's preferences
+            groupPreferences.remove(groupId);
+            setDirty();
+
+            CrushingWheelRecipeSelector.LOGGER.info("Dissolved group {} - {} wheel(s) unlinked", groupId, wheelsInGroup.size());
         }
     }
 
