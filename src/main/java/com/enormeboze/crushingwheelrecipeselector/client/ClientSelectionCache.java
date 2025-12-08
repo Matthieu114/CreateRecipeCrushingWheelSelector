@@ -16,13 +16,34 @@ public class ClientSelectionCache {
     private static final Map<BlockPos, Map<String, ResourceLocation>> cachedSelections = new HashMap<>();
 
     /**
-     * Update cached selections for a wheel (called when receiving sync packet)
+     * Update all cached selections for a wheel (called when receiving sync packet)
      */
     public static void updateSelections(BlockPos wheelPos, Map<String, ResourceLocation> selections) {
         if (selections.isEmpty()) {
             cachedSelections.remove(wheelPos);
         } else {
             cachedSelections.put(wheelPos, new HashMap<>(selections));
+        }
+    }
+
+    /**
+     * Update a single selection for a wheel and item (called when confirming)
+     */
+    public static void updateSelection(BlockPos wheelPos, String inputItemId, ResourceLocation recipeId) {
+        Map<String, ResourceLocation> selections = cachedSelections.computeIfAbsent(wheelPos, k -> new HashMap<>());
+        selections.put(inputItemId, recipeId);
+    }
+
+    /**
+     * Clear a single selection for a wheel and item (called when clearing)
+     */
+    public static void clearSelection(BlockPos wheelPos, String inputItemId) {
+        Map<String, ResourceLocation> selections = cachedSelections.get(wheelPos);
+        if (selections != null) {
+            selections.remove(inputItemId);
+            if (selections.isEmpty()) {
+                cachedSelections.remove(wheelPos);
+            }
         }
     }
 

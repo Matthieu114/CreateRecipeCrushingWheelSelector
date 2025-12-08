@@ -42,6 +42,7 @@ public class RecipeDetailScreen extends Screen {
     private final List<RecipeHandler.RecipeConflict> recipes;
 
     private ResourceLocation selectedRecipeId;
+    private ResourceLocation pendingSelection; // The recipe user clicked on (not yet confirmed)
     private int scrollOffset = 0;
     private int maxScroll = 0;
 
@@ -54,6 +55,7 @@ public class RecipeDetailScreen extends Screen {
         this.inputItemStack = inputItemStack;
         this.recipes = recipes;
         this.selectedRecipeId = ClientSelectionCache.getSelection(wheelPosition, inputItemId);
+        this.pendingSelection = this.selectedRecipeId; // Start with current selection
     }
 
     @Override
@@ -63,15 +65,24 @@ public class RecipeDetailScreen extends Screen {
         int panelX = (this.width - PANEL_WIDTH) / 2;
         int panelY = (this.height - PANEL_HEIGHT) / 2;
 
+        // Back button (left)
         this.addRenderableWidget(
-                Button.builder(Component.literal("Back"), b -> this.onClose())
-                        .bounds(panelX + 10, panelY + PANEL_HEIGHT - 24, 50, 20)
+                Button.builder(Component.literal("Back"), b -> goBack())
+                        .bounds(panelX + 8, panelY + PANEL_HEIGHT - 24, 45, 20)
                         .build()
         );
 
+        // Confirm button (right side, left of Clear)
+        this.addRenderableWidget(
+                Button.builder(Component.literal("Confirm"), b -> confirmSelection())
+                        .bounds(panelX + PANEL_WIDTH - 103, panelY + PANEL_HEIGHT - 24, 50, 20)
+                        .build()
+        );
+
+        // Clear button (far right)
         this.addRenderableWidget(
                 Button.builder(Component.literal("Clear"), b -> clearSelection())
-                        .bounds(panelX + PANEL_WIDTH - 60, panelY + PANEL_HEIGHT - 24, 50, 20)
+                        .bounds(panelX + PANEL_WIDTH - 50, panelY + PANEL_HEIGHT - 24, 42, 20)
                         .build()
         );
     }
@@ -124,9 +135,7 @@ public class RecipeDetailScreen extends Screen {
         graphics.fill(x + width - 3, y + 2, x + width - 2, y + 3, BORDER_LIGHT);
     }
 
-    private void drawRecipeBox(GuiGraphics graphics, int x, int y, int width, int height, boolean selected, boolean hovered) {
-        int bgColor = selected ? RECIPE_SELECTED : (hovered ? RECIPE_HOVER : RECIPE_BG);
-
+    private void drawRecipeBox(GuiGraphics graphics, int x, int y, int width, int height, boolean selected, boolean hovered, int bgColor) {
         // Main fill with rounded corners
         graphics.fill(x + 2, y + 2, x + width - 2, y + height - 2, bgColor);
         graphics.fill(x + 3, y + 1, x + width - 3, y + height - 1, bgColor);
@@ -193,11 +202,14 @@ public class RecipeDetailScreen extends Screen {
             if (boxY + RECIPE_HEIGHT < listStartY || boxY > listStartY + listHeight) continue;
 
             boolean isSelected = recipe.recipeId().equals(selectedRecipeId);
+            boolean isPending = recipe.recipeId().equals(pendingSelection) && !isSelected;
             boolean isHovered = mouseX >= recipeX && mouseX < recipeX + recipeWidth &&
                     mouseY >= boxY && mouseY < boxY + RECIPE_HEIGHT &&
                     mouseY >= listStartY && mouseY <= listStartY + listHeight;
 
-            drawRecipeBox(graphics, recipeX, boxY, recipeWidth, RECIPE_HEIGHT, isSelected, isHovered);
+            // Use different colors: green for confirmed, yellow tint for pending
+            int bgColor = isSelected ? RECIPE_SELECTED : (isPending ? 0xFFEEEEAA : (isHovered ? RECIPE_HOVER : RECIPE_BG));
+            drawRecipeBox(graphics, recipeX, boxY, recipeWidth, RECIPE_HEIGHT, isSelected, isHovered, bgColor);
 
             // Mod name - clean text, no shadow
             String modName = getModName(recipe.recipeId());
@@ -241,9 +253,13 @@ public class RecipeDetailScreen extends Screen {
                 graphics.drawString(this.font, "No secondaries", recipeX + 6, slotY + 4, 0xFF888888, false);
             }
 
-            // Checkmark if selected - bright green, clean
-            if (isSelected) {
+            // Checkmark if this is the confirmed selection
+            if (recipe.recipeId().equals(selectedRecipeId)) {
                 graphics.drawString(this.font, "\u2714", recipeX + recipeWidth - 12, boxY + 4, 0xFF00DD00, false);
+            }
+            // Show pending indicator (yellow) if selected but not yet confirmed
+            else if (recipe.recipeId().equals(pendingSelection)) {
+                graphics.drawString(this.font, "\u25CF", recipeX + recipeWidth - 12, boxY + 4, 0xFFFFAA00, false);
             }
         }
 
@@ -355,25 +371,77 @@ public class RecipeDetailScreen extends Screen {
     }
 
     private void selectRecipe(RecipeHandler.RecipeConflict recipe) {
-        this.selectedRecipeId = recipe.recipeId();
-        PacketDistributor.sendToServer(new SelectRecipePacket(wheelPosition, inputItemId, recipe.recipeId()));
-        Minecraft.getInstance().player.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 1.0F, 1.0F);
-        if (Minecraft.getInstance().player != null) {
-            Minecraft.getInstance().player.displayClientMessage(Component.literal("§aSelected: §f" + recipe.primaryOutput()), true);
+        // Only set as pending - don't send to server until confirmed
+        this.pendingSelection = recipe.recipeId();
+        Minecraft.getInstance().player.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 1.0F, 0.8F);
+    }
+
+    private void confirmSelection() {
+        if (pendingSelection == null) {
+            if (Minecraft.getInstance().player != null) {
+                Minecraft.getInstance().player.displayClientMessage(Component.literal("§cNo recipe selected"), true);
+            }
+            return;
         }
+
+        // Save the selection
+        this.selectedRecipeId = pendingSelection;
+
+        // Send to server
+        PacketDistributor.sendToServer(new SelectRecipePacket(wheelPosition, inputItemId, pendingSelection));
+
+        // Update client cache immediately so it reflects the change
+        ClientSelectionCache.updateSelection(wheelPosition, inputItemId, pendingSelection);
+
+        Minecraft.getInstance().player.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 1.0F, 1.2F);
+
+        if (Minecraft.getInstance().player != null) {
+            // Find the recipe name for the message
+            String recipeName = pendingSelection.toString();
+            for (RecipeHandler.RecipeConflict recipe : recipes) {
+                if (recipe.recipeId().equals(pendingSelection)) {
+                    recipeName = recipe.primaryOutput();
+                    break;
+                }
+            }
+            Minecraft.getInstance().player.displayClientMessage(Component.literal("§aConfirmed: §f" + recipeName), true);
+        }
+
+        // Don't close GUI - user can continue selecting other recipes
     }
 
     private void clearSelection() {
         this.selectedRecipeId = null;
+        this.pendingSelection = null;
+
+        // Send to server
         PacketDistributor.sendToServer(new ClearRecipePacket(wheelPosition, inputItemId));
+
+        // Update client cache immediately
+        ClientSelectionCache.clearSelection(wheelPosition, inputItemId);
+
+        Minecraft.getInstance().player.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 1.0F, 0.8F);
+
         if (Minecraft.getInstance().player != null) {
             Minecraft.getInstance().player.displayClientMessage(Component.literal("§7Selection cleared"), true);
         }
+
+        // Don't close GUI
     }
 
+    /**
+     * Go back to selector screen (Back button)
+     */
+    private void goBack() {
+        Minecraft.getInstance().setScreen(parent);
+    }
+
+    /**
+     * Called when pressing Escape - completely exit GUI
+     */
     @Override
     public void onClose() {
-        Minecraft.getInstance().setScreen(parent);
+        Minecraft.getInstance().setScreen(null);
     }
 
     @Override
