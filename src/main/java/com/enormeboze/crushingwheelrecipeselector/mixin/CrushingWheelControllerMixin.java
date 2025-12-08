@@ -14,11 +14,15 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import java.util.List;
 import java.util.Optional;
 
 @Mixin(value = CrushingWheelControllerBlockEntity.class, remap = false)
 public abstract class CrushingWheelControllerMixin {
 
+    /**
+     * Target findRecipe WITHOUT parameters - let mixin figure it out
+     */
     @Inject(
             method = "findRecipe",
             at = @At("RETURN"),
@@ -26,67 +30,140 @@ public abstract class CrushingWheelControllerMixin {
             remap = false,
             require = 0
     )
-    private void onAnyMethod(CallbackInfoReturnable<Optional<RecipeHolder<? extends AbstractCrushingRecipe>>> cir) {
+    private void onFindRecipe(CallbackInfoReturnable<Optional<RecipeHolder<? extends AbstractCrushingRecipe>>> cir) {
         try {
-            // 1. Validation and Context Setup
-            if (!(cir.getReturnValue() instanceof Optional<?> optional) || optional.isEmpty()) return;
-            if (!(optional.get() instanceof RecipeHolder<?> holder) || !(holder.value() instanceof AbstractCrushingRecipe)) return;
+            CrushingWheelRecipeSelector.LOGGER.info("🔍 MIXIN CALLED!");
 
             CrushingWheelControllerBlockEntity blockEntity = (CrushingWheelControllerBlockEntity) (Object) this;
-            if (!(blockEntity.getLevel() instanceof ServerLevel serverLevel)) return;
+
+            if (!(blockEntity.getLevel() instanceof ServerLevel serverLevel)) {
+                CrushingWheelRecipeSelector.LOGGER.info("❌ Client side");
+                return;
+            }
+
+            CrushingWheelRecipeSelector.LOGGER.info("✅ Server side!");
+
+            Optional<RecipeHolder<? extends AbstractCrushingRecipe>> currentRecipe = cir.getReturnValue();
+            if (currentRecipe.isEmpty()) {
+                CrushingWheelRecipeSelector.LOGGER.info("❌ No recipe found");
+                return;
+            }
+
+            CrushingWheelRecipeSelector.LOGGER.info("✅ Current recipe: {}", currentRecipe.get().id());
+
             BlockPos pos = blockEntity.getBlockPos();
 
-            // 2. Identify the Input Item from the currently found recipe
-            Optional<RecipeHolder<? extends AbstractCrushingRecipe>> currentRecipe = cir.getReturnValue();
+            // Get item from recipe ingredients
             AbstractCrushingRecipe recipe = (AbstractCrushingRecipe) currentRecipe.get().value();
-
-            if (recipe.getIngredients().isEmpty()) return;
-            ItemStack[] possibleInputs = recipe.getIngredients().get(0).getItems();
-            if (possibleInputs == null || possibleInputs.length == 0) return;
-
-            String inputItemId;
-            try {
-                // We use the item ID of the first possible ingredient as the key
-                inputItemId = net.minecraft.core.registries.BuiltInRegistries.ITEM
-                        .getKey(possibleInputs[0].getItem()).toString();
-            } catch (Exception e) {
+            if (recipe.getIngredients().isEmpty()) {
+                CrushingWheelRecipeSelector.LOGGER.info("❌ No ingredients");
                 return;
             }
 
-            // 3. Lookup Preference
-            CrushingWheelSelections selections = CrushingWheelSelections.get(serverLevel);
-            ResourceLocation preferredRecipeId = selections.getPreferredRecipe(pos, inputItemId);
+            ItemStack[] possibleInputs = recipe.getIngredients().get(0).getItems();
+            if (possibleInputs.length == 0) {
+                CrushingWheelRecipeSelector.LOGGER.info("❌ No possible inputs");
+                return;
+            }
 
-            CrushingWheelRecipeSelector.LOGGER.info("MIXIN: Processing crush at {} for input {}. Found default recipe {}. Preferred ID in map: {}",
-                    pos, inputItemId, currentRecipe.get().id(), preferredRecipeId); // LOG 1: Check if preferred ID is found
+            String inputItemId = net.minecraft.core.registries.BuiltInRegistries.ITEM
+                    .getKey(possibleInputs[0].getItem()).toString();
+
+            CrushingWheelRecipeSelector.LOGGER.info("📍 Controller Position: {}, Item: {}", pos, inputItemId);
+
+            CrushingWheelSelections selections = CrushingWheelSelections.get(serverLevel);
+
+            // CRITICAL FIX: The controller block is BETWEEN the wheels
+            // We need to check the adjacent wheel positions (not the controller itself)
+            // because that's where the player configured the recipes
+
+            List<BlockPos> wheelPositions = new java.util.ArrayList<>();
+
+            // Check all 4 horizontal directions for actual wheel blocks
+            for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+                BlockPos adjacentPos = pos.relative(direction);
+
+                // Check if this position has a linked group (is configured)
+                if (selections.isWheelLinked(adjacentPos)) {
+                    wheelPositions.add(adjacentPos);
+                    CrushingWheelRecipeSelector.LOGGER.info("  Found linked wheel at: {}", adjacentPos);
+                }
+            }
+
+            CrushingWheelRecipeSelector.LOGGER.info("🔗 Found {} linked wheel(s)", wheelPositions.size());
+
+            // Try to find a preference from any of the linked wheels
+            ResourceLocation preferredRecipeId = null;
+            BlockPos foundAtPos = null;
+
+            for (BlockPos wheelPos : wheelPositions) {
+                ResourceLocation pref = selections.getPreferredRecipe(wheelPos, inputItemId);
+                if (pref != null) {
+                    preferredRecipeId = pref;
+                    foundAtPos = wheelPos;
+                    CrushingWheelRecipeSelector.LOGGER.info("✅ Found preference at {}: {}", wheelPos, pref);
+                    break; // Found it!
+                }
+            }
+
+            CrushingWheelRecipeSelector.LOGGER.info("🔍 Final Preferred: {} (from {})", preferredRecipeId, foundAtPos);
 
             if (preferredRecipeId == null) {
+                CrushingWheelRecipeSelector.LOGGER.info("❌ No preference");
                 return;
             }
 
-            // 4. Apply the Preference
+            // Make final for lambda usage
+            final ResourceLocation finalPreferredRecipeId = preferredRecipeId;
+
             ResourceLocation currentRecipeId = currentRecipe.get().id();
-
-            if (currentRecipeId.equals(preferredRecipeId)) {
+            if (currentRecipeId.equals(finalPreferredRecipeId)) {
+                CrushingWheelRecipeSelector.LOGGER.info("✅ Already correct!");
                 return;
             }
 
-            Optional<? extends RecipeHolder<? extends AbstractCrushingRecipe>> preferredHolderOpt = serverLevel.getRecipeManager().byKey(preferredRecipeId)
-                    .filter(h -> h.value() instanceof AbstractCrushingRecipe)
-                    .map(h -> (RecipeHolder<? extends AbstractCrushingRecipe>) h);
+            CrushingWheelRecipeSelector.LOGGER.info("🔄 Need to switch from {} to {}", currentRecipeId, finalPreferredRecipeId);
 
-            if (preferredHolderOpt.isPresent()) {
-                // FORCE the return value to be our preferred recipe
-                Optional<RecipeHolder<? extends AbstractCrushingRecipe>> result = (Optional) preferredHolderOpt;
+            // Get ALL crushing recipes
+            @SuppressWarnings("unchecked")
+            List<RecipeHolder<AbstractCrushingRecipe>> allRecipes = (List<RecipeHolder<AbstractCrushingRecipe>>) (List<?>)
+                    serverLevel.getRecipeManager()
+                            .getAllRecipesFor((net.minecraft.world.item.crafting.RecipeType<AbstractCrushingRecipe>)
+                                    (net.minecraft.world.item.crafting.RecipeType<?>) currentRecipe.get().value().getType())
+                            .stream()
+                            .filter(holder -> {
+                                var ingredients = ((AbstractCrushingRecipe) holder.value()).getIngredients();
+                                if (ingredients.isEmpty()) return false;
+                                return ingredients.get(0).test(possibleInputs[0]);
+                            })
+                            .toList();
+
+            CrushingWheelRecipeSelector.LOGGER.info("🔍 Found {} total recipes", allRecipes.size());
+
+            // Log all recipes
+            for (RecipeHolder<AbstractCrushingRecipe> r : allRecipes) {
+                CrushingWheelRecipeSelector.LOGGER.info("  - {}", r.id());
+            }
+
+            Optional<RecipeHolder<AbstractCrushingRecipe>> preferredRecipe = allRecipes.stream()
+                    .filter(holder -> holder.id().equals(finalPreferredRecipeId))
+                    .findFirst();
+
+            if (preferredRecipe.isPresent()) {
+                @SuppressWarnings("unchecked")
+                Optional<RecipeHolder<? extends AbstractCrushingRecipe>> result =
+                        (Optional<RecipeHolder<? extends AbstractCrushingRecipe>>) (Optional<?>) preferredRecipe;
+
                 cir.setReturnValue(result);
 
-                CrushingWheelRecipeSelector.LOGGER.info("MIXIN: Applying preferred recipe {} for input {}", preferredRecipeId, inputItemId); // LOG 2: Recipe applied
+                CrushingWheelRecipeSelector.LOGGER.info("🎉🎉🎉 RECIPE OVERRIDDEN! Set to: {}", finalPreferredRecipeId);
+                CrushingWheelRecipeSelector.LOGGER.info("🎉 Return value is now: {}", cir.getReturnValue().get().id());
             } else {
-                CrushingWheelRecipeSelector.LOGGER.warn("MIXIN: Preferred recipe {} not found in Recipe Manager.", preferredRecipeId); // LOG 3: Recipe ID not found
+                CrushingWheelRecipeSelector.LOGGER.warn("⚠️ Preferred recipe {} NOT FOUND in recipe list!", finalPreferredRecipeId);
             }
 
         } catch (Throwable t) {
-            CrushingWheelRecipeSelector.LOGGER.error("Mixin error in CrushingWheelControllerMixin", t);
+            CrushingWheelRecipeSelector.LOGGER.error("❌ Mixin error!", t);
         }
     }
 }
