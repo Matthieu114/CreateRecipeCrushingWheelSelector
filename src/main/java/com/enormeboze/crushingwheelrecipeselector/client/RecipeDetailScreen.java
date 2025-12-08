@@ -1,6 +1,7 @@
 package com.enormeboze.crushingwheelrecipeselector.client;
 
 import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
+import com.enormeboze.crushingwheelrecipeselector.CrushingWheelPairHelper;
 import com.enormeboze.crushingwheelrecipeselector.RecipeHandler;
 import com.enormeboze.crushingwheelrecipeselector.network.ClearRecipePacket;
 import com.enormeboze.crushingwheelrecipeselector.network.SelectRecipePacket;
@@ -116,10 +117,50 @@ public class RecipeDetailScreen extends Screen {
         graphics.drawString(this.font, inputItemStack.getHoverName().getString(), 
             startX + inputTextWidth + 26, inputY, 0xFFFFFF);
 
+        // Check for paired wheel conflict and show warning
+        renderPairedWheelWarning(graphics, panelX, panelY + 50, panelWidth);
+
         // recipe list area (responsive)
         renderRecipeList(graphics, mouseX, mouseY, panelX, panelY, panelWidth, panelHeight);
 
         super.render(graphics, mouseX, mouseY, partialTick);
+    }
+
+    /**
+     * Show warning if paired wheel has different selection
+     */
+    private void renderPairedWheelWarning(GuiGraphics graphics, int x, int y, int width) {
+        // Check if there's a paired wheel
+        BlockPos pairedWheel = CrushingWheelPairHelper.findPairedWheel(
+            Minecraft.getInstance().level, 
+            wheelPosition
+        );
+        
+        if (pairedWheel == null) {
+            return; // No pair, no warning needed
+        }
+
+        // Check if paired wheel has a different selection for this item
+        ResourceLocation pairedSelection = ClientSelectionCache.getSelection(pairedWheel, inputItemId);
+        
+        // If paired wheel has no selection, no conflict
+        if (pairedSelection == null) {
+            return;
+        }
+
+        // If selections match, no conflict
+        if (pairedSelection.equals(selectedRecipeId)) {
+            return;
+        }
+
+        // Show warning about conflict
+        String warningText = "⚠ Paired wheel has different selection!";
+        int textWidth = this.font.width(warningText);
+        int textX = x + (width - textWidth) / 2;
+        
+        // Warning background
+        graphics.fill(x + 10, y, x + width - 10, y + 12, 0x80FF8800);
+        graphics.drawString(this.font, warningText, textX, y + 2, 0xFFFF00);
     }
 
     private void renderRecipeList(GuiGraphics graphics, int mouseX, int mouseY, int panelX, int panelY, int panelWidth, int panelHeight) {

@@ -9,6 +9,13 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
+// ------------------------------------
+// REQUIRED IMPORTS TO FIX YOUR ERRORS
+import net.minecraft.core.BlockPos; // FIX 1: Cannot resolve symbol 'BlockPos'
+import net.minecraft.client.Minecraft; // Needed for client screen access
+import com.enormeboze.crushingwheelrecipeselector.client.RecipeSelectorScreen; // Needed for client screen access
+// ------------------------------------
+
 /**
  * Handles network packet registration and packet handling
  */
@@ -19,29 +26,27 @@ public class ModNetworking {
      */
     public static void register(RegisterPayloadHandlersEvent event) {
         PayloadRegistrar registrar = event.registrar("1");
-        
+
         // Register select recipe packet (client -> server)
         registrar.playToServer(
-            SelectRecipePacket.TYPE,
-            SelectRecipePacket.STREAM_CODEC,
-            ModNetworking::handleSelectRecipe
+                SelectRecipePacket.TYPE,
+                SelectRecipePacket.STREAM_CODEC,
+                ModNetworking::handleSelectRecipe
         );
-        
+
         // Register clear recipe packet (client -> server)
         registrar.playToServer(
-            ClearRecipePacket.TYPE,
-            ClearRecipePacket.STREAM_CODEC,
-            ModNetworking::handleClearRecipe
+                ClearRecipePacket.TYPE,
+                ClearRecipePacket.STREAM_CODEC,
+                ModNetworking::handleClearRecipe
         );
-        
+
         // Register sync selections packet (server -> client)
         registrar.playToClient(
-            SyncSelectionsPacket.TYPE,
-            SyncSelectionsPacket.STREAM_CODEC,
-            ModNetworking::handleSyncSelections
+                SyncSelectionsPacket.TYPE,
+                SyncSelectionsPacket.STREAM_CODEC,
+                ModNetworking::handleSyncSelections
         );
-        
-        CrushingWheelRecipeSelector.LOGGER.info("Registered network packets");
     }
 
     /**
@@ -51,23 +56,23 @@ public class ModNetworking {
         context.enqueueWork(() -> {
             if (context.player() instanceof ServerPlayer serverPlayer) {
                 ServerLevel level = serverPlayer.serverLevel();
-                
-                // Get or create the selections data
+
+                // Get the selections data
                 CrushingWheelSelections selections = CrushingWheelSelections.get(level);
-                
-                // Save the selection
+
+                // Set the selection for this item at this wheel (which is handled by the group ID now)
                 selections.setPreferredRecipe(
-                    packet.wheelPosition(),
-                    packet.inputItemId(),
-                    packet.recipeId()
+                        packet.wheelPosition(),
+                        packet.inputItemId(),
+                        packet.recipeId()
                 );
-                
+
                 CrushingWheelRecipeSelector.LOGGER.info(
-                    "Player {} selected recipe {} for item {} at wheel {}",
-                    serverPlayer.getName().getString(),
-                    packet.recipeId(),
-                    packet.inputItemId(),
-                    packet.wheelPosition()
+                        "Player {} set recipe {} for item {} at wheel {}",
+                        serverPlayer.getName().getString(),
+                        packet.recipeId(),
+                        packet.inputItemId(),
+                        packet.wheelPosition()
                 );
             }
         });
@@ -80,18 +85,18 @@ public class ModNetworking {
         context.enqueueWork(() -> {
             if (context.player() instanceof ServerPlayer serverPlayer) {
                 ServerLevel level = serverPlayer.serverLevel();
-                
+
                 // Get the selections data
                 CrushingWheelSelections selections = CrushingWheelSelections.get(level);
-                
+
                 // Clear the selection for this item at this wheel
                 selections.clearPreferredRecipe(packet.wheelPosition(), packet.inputItemId());
-                
+
                 CrushingWheelRecipeSelector.LOGGER.info(
-                    "Player {} cleared recipe selection for item {} at wheel {}",
-                    serverPlayer.getName().getString(),
-                    packet.inputItemId(),
-                    packet.wheelPosition()
+                        "Player {} cleared recipe selection for item {} at wheel {}",
+                        serverPlayer.getName().getString(),
+                        packet.inputItemId(),
+                        packet.wheelPosition()
                 );
             }
         });
@@ -104,12 +109,16 @@ public class ModNetworking {
         context.enqueueWork(() -> {
             // Update client-side cache with synced selections
             ClientSelectionCache.updateSelections(packet.wheelPosition(), packet.selections());
-            
+
             CrushingWheelRecipeSelector.LOGGER.info(
-                "Received {} selections for wheel at {}",
-                packet.selections().size(),
-                packet.wheelPosition()
+                    "Received {} selections for wheel at {}. Opening GUI.",
+                    packet.selections().size(),
+                    packet.wheelPosition()
             );
+
+            // Open the GUI
+            com.enormeboze.crushingwheelrecipeselector.client.ClientScreenHelper.openRecipeSelectorScreen(packet.wheelPosition());
         });
     }
+
 }

@@ -31,3 +31,7 @@ type="required"
 versionRange="[0.6.0,)"
 ordering="AFTER"
 side="BOTH"
+
+[[mixins]]
+config="crushingwheelrecipeselector.mixins.json"
+

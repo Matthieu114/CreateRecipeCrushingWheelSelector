@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.enormeboze.crushingwheelrecipeselector.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "crushingwheelrecipeselector.refmap.json",
+  "mixins": [
+    "CrushingWheelControllerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

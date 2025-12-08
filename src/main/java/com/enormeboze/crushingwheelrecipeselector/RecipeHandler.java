@@ -96,6 +96,7 @@ public class RecipeHandler {
             CrushingWheelRecipeSelector.LOGGER.info("Found {} items with conflicting recipes.",
                     conflictingRecipes.size());
         }
+
     }
 
     private static String getItemId(ItemStack stack) {
