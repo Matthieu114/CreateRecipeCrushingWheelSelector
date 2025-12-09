@@ -21,11 +21,6 @@ import java.util.Optional;
 
 /**
  * Mixin to intercept recipe lookups and apply user's preferred recipe selection.
- *
- * PERFORMANCE OPTIMIZATIONS:
- * - Early exit for unlinked wheels via O(1) HashSet lookup
- * - Cached direction array
- * - No debug logging in hot path
  */
 @Mixin(value = CrushingWheelControllerBlockEntity.class, remap = false)
 public class CrushingWheelControllerMixin {
@@ -48,7 +43,6 @@ public class CrushingWheelControllerMixin {
 
         BlockPos controllerPos = self.getBlockPos();
 
-        // PERFORMANCE: Quick check if this controller has linked wheels
         CrushingWheelSelections selections = CrushingWheelSelections.get(serverLevel);
         if (selections == null || !selections.isControllerActive(controllerPos)) {
             return;
@@ -83,15 +77,11 @@ public class CrushingWheelControllerMixin {
         }
 
         // Get all recipes and find the preferred one
-        // In 1.20.1, we iterate through all recipes directly
         Collection<Recipe<?>> allRecipes = level.getRecipeManager().getRecipes();
 
         for (Recipe<?> recipe : allRecipes) {
-            // Check if this is our preferred recipe
             if (recipe.getId().equals(preferredRecipeId)) {
-                // Verify it's a crushing recipe
                 if (recipe instanceof CrushingRecipe crushingRecipe) {
-                    // The user selected this recipe for this input, so we trust it matches
                     cir.setReturnValue(Optional.of(crushingRecipe));
                     return;
                 }
