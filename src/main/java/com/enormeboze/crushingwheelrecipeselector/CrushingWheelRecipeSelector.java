@@ -3,8 +3,11 @@ package com.enormeboze.crushingwheelrecipeselector;
 import com.enormeboze.crushingwheelrecipeselector.network.ModNetworking;
 import org.slf4j.Logger;
 import com.mojang.logging.LogUtils;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.common.Mod;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
 @Mod(CrushingWheelRecipeSelector.MOD_ID)
 public class CrushingWheelRecipeSelector {
@@ -12,17 +15,22 @@ public class CrushingWheelRecipeSelector {
     public static final String MOD_ID = "crushingwheelrecipeselector";
     public static final Logger LOGGER = LogUtils.getLogger();
 
-    public CrushingWheelRecipeSelector(IEventBus modEventBus) {
+    public CrushingWheelRecipeSelector() {
         LOGGER.info("Crushing Wheel Recipe Selector initializing...");
 
-        // Register network packets on MOD bus
-        ModNetworking.register(modEventBus);
+        IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
 
-        // Other handlers use @EventBusSubscriber on GAME bus (default) so they auto-register:
-        // - WrenchHandler (wrench interaction)
-        // - RecipeHandler (recipe scanning)
-        // - BreakHandler (wheel break cleanup)
+        // Register setup method
+        modEventBus.addListener(this::commonSetup);
+
+        // Register ourselves for game events
+        MinecraftForge.EVENT_BUS.register(this);
 
         LOGGER.info("Crushing Wheel Recipe Selector initialized!");
+    }
+
+    private void commonSetup(final FMLCommonSetupEvent event) {
+        // Register network packets on main thread
+        event.enqueueWork(ModNetworking::register);
     }
 }

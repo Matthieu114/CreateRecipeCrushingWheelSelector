@@ -3,6 +3,7 @@ package com.enormeboze.crushingwheelrecipeselector.client;
 import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
 import com.enormeboze.crushingwheelrecipeselector.RecipeHandler;
 import com.enormeboze.crushingwheelrecipeselector.network.ClearRecipePacket;
+import com.enormeboze.crushingwheelrecipeselector.network.ModNetworking;
 import com.enormeboze.crushingwheelrecipeselector.network.SelectRecipePacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -13,11 +14,13 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.neoforged.neoforge.network.PacketDistributor;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
 import java.util.ArrayList;
 import java.util.List;
 
+@OnlyIn(Dist.CLIENT)
 public class RecipeDetailScreen extends Screen {
 
     private static final int PANEL_COLOR = 0xFFC6C6C6;
@@ -289,7 +292,7 @@ public class RecipeDetailScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollY) {
         scrollOffset -= (int) (scrollY * 20);
         scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
         return true;
@@ -333,8 +336,8 @@ public class RecipeDetailScreen extends Screen {
     private ItemStack getItemStackFromOutput(String output) {
         try {
             String itemId = output.split(" ")[0];
-            ResourceLocation location = ResourceLocation.parse(itemId);
-            var item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(location);
+            ResourceLocation location = new ResourceLocation(itemId);
+            var item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(location);
             if (item != null && item != Items.AIR) {
                 return new ItemStack(item);
             }
@@ -387,8 +390,8 @@ public class RecipeDetailScreen extends Screen {
         // Save the selection
         this.selectedRecipeId = pendingSelection;
 
-        // Send to server
-        PacketDistributor.sendToServer(new SelectRecipePacket(wheelPosition, inputItemId, pendingSelection));
+        // Send to server using Forge networking
+        ModNetworking.sendToServer(new SelectRecipePacket(wheelPosition, inputItemId, pendingSelection));
 
         // Update client cache immediately so it reflects the change
         ClientSelectionCache.updateSelection(wheelPosition, inputItemId, pendingSelection);
@@ -414,8 +417,8 @@ public class RecipeDetailScreen extends Screen {
         this.selectedRecipeId = null;
         this.pendingSelection = null;
 
-        // Send to server
-        PacketDistributor.sendToServer(new ClearRecipePacket(wheelPosition, inputItemId));
+        // Send to server using Forge networking
+        ModNetworking.sendToServer(new ClearRecipePacket(wheelPosition, inputItemId));
 
         // Update client cache immediately
         ClientSelectionCache.clearSelection(wheelPosition, inputItemId);
@@ -450,7 +453,7 @@ public class RecipeDetailScreen extends Screen {
     }
 
     @Override
-    public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+    public void renderBackground(GuiGraphics graphics) {
         // Empty - we draw our own background
     }
 }

@@ -4,58 +4,53 @@ import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
 import com.enormeboze.crushingwheelrecipeselector.CrushingWheelSelections;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.minecraftforge.network.NetworkEvent;
+
+import java.util.function.Supplier;
 
 /**
  * Sent from client to server when player clears a recipe selection
  */
-public record ClearRecipePacket(
-        BlockPos wheelPos,
-        String inputItemId
-) implements CustomPacketPayload {
+public class ClearRecipePacket {
 
-    public static final CustomPacketPayload.Type<ClearRecipePacket> TYPE =
-            new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(CrushingWheelRecipeSelector.MOD_ID, "clear_recipe"));
+    private final BlockPos wheelPos;
+    private final String inputItemId;
 
-    public static final StreamCodec<FriendlyByteBuf, ClearRecipePacket> STREAM_CODEC =
-            StreamCodec.of(ClearRecipePacket::write, ClearRecipePacket::read);
-
-    public static void write(FriendlyByteBuf buf, ClearRecipePacket packet) {
-        buf.writeBlockPos(packet.wheelPos);
-        buf.writeUtf(packet.inputItemId);
+    public ClearRecipePacket(BlockPos wheelPos, String inputItemId) {
+        this.wheelPos = wheelPos;
+        this.inputItemId = inputItemId;
     }
 
-    public static ClearRecipePacket read(FriendlyByteBuf buf) {
-        return new ClearRecipePacket(
-                buf.readBlockPos(),
-                buf.readUtf()
-        );
+    // Decoder constructor
+    public ClearRecipePacket(FriendlyByteBuf buf) {
+        this.wheelPos = buf.readBlockPos();
+        this.inputItemId = buf.readUtf();
     }
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    // Encoder
+    public void toBytes(FriendlyByteBuf buf) {
+        buf.writeBlockPos(wheelPos);
+        buf.writeUtf(inputItemId);
     }
 
-    public static void handle(ClearRecipePacket packet, IPayloadContext context) {
+    // Handler
+    public boolean handle(Supplier<NetworkEvent.Context> supplier) {
+        NetworkEvent.Context context = supplier.get();
         context.enqueueWork(() -> {
-            if (context.player() instanceof ServerPlayer serverPlayer) {
-                BlockPos wheelPos = packet.wheelPos();
-                String inputItemId = packet.inputItemId();
-
+            ServerPlayer player = context.getSender();
+            if (player != null) {
                 CrushingWheelRecipeSelector.LOGGER.debug("Player {} cleared recipe for item {} at {}",
-                        serverPlayer.getName().getString(), inputItemId, wheelPos);
+                        player.getName().getString(), inputItemId, wheelPos);
 
                 // Clear the selection from world data
-                CrushingWheelSelections selections = CrushingWheelSelections.get(serverPlayer.serverLevel());
+                CrushingWheelSelections selections = CrushingWheelSelections.get(player.serverLevel());
                 if (selections != null) {
                     selections.clearPreferredRecipe(wheelPos, inputItemId);
                 }
             }
         });
+        context.setPacketHandled(true);
+        return true;
     }
 }

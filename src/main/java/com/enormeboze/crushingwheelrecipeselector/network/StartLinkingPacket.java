@@ -1,82 +1,74 @@
 package com.enormeboze.crushingwheelrecipeselector.network;
 
-import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
-import com.enormeboze.crushingwheelrecipeselector.client.WheelHighlightRenderer;
+import com.enormeboze.crushingwheelrecipeselector.client.ClientPacketHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.ResourceLocation;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.minecraftforge.network.NetworkEvent;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Sent from server to client when player starts linking process.
  * Contains the selected wheel position, valid targets (green), and invalid targets (red).
  */
-public record StartLinkingPacket(
-        BlockPos selectedWheel,
-        Set<BlockPos> validTargets,
-        Set<BlockPos> invalidTargets
-) implements CustomPacketPayload {
+public class StartLinkingPacket {
 
-    public static final CustomPacketPayload.Type<StartLinkingPacket> TYPE =
-            new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(CrushingWheelRecipeSelector.MOD_ID, "start_linking"));
+    private final BlockPos selectedWheel;
+    private final Set<BlockPos> validTargets;
+    private final Set<BlockPos> invalidTargets;
 
-    public static final StreamCodec<FriendlyByteBuf, StartLinkingPacket> STREAM_CODEC =
-            StreamCodec.of(StartLinkingPacket::write, StartLinkingPacket::read);
-
-    public static void write(FriendlyByteBuf buf, StartLinkingPacket packet) {
-        buf.writeBlockPos(packet.selectedWheel);
-
-        // Write valid targets
-        buf.writeInt(packet.validTargets.size());
-        for (BlockPos pos : packet.validTargets) {
-            buf.writeBlockPos(pos);
-        }
-
-        // Write invalid targets
-        buf.writeInt(packet.invalidTargets.size());
-        for (BlockPos pos : packet.invalidTargets) {
-            buf.writeBlockPos(pos);
-        }
+    public StartLinkingPacket(BlockPos selectedWheel, Set<BlockPos> validTargets, Set<BlockPos> invalidTargets) {
+        this.selectedWheel = selectedWheel;
+        this.validTargets = validTargets;
+        this.invalidTargets = invalidTargets;
     }
 
-    public static StartLinkingPacket read(FriendlyByteBuf buf) {
-        BlockPos selected = buf.readBlockPos();
+    // Decoder constructor
+    public StartLinkingPacket(FriendlyByteBuf buf) {
+        this.selectedWheel = buf.readBlockPos();
 
         // Read valid targets
         int validCount = buf.readInt();
-        Set<BlockPos> valid = new HashSet<>(validCount);
+        this.validTargets = new HashSet<>(validCount);
         for (int i = 0; i < validCount; i++) {
-            valid.add(buf.readBlockPos());
+            validTargets.add(buf.readBlockPos());
         }
 
         // Read invalid targets
         int invalidCount = buf.readInt();
-        Set<BlockPos> invalid = new HashSet<>(invalidCount);
+        this.invalidTargets = new HashSet<>(invalidCount);
         for (int i = 0; i < invalidCount; i++) {
-            invalid.add(buf.readBlockPos());
+            invalidTargets.add(buf.readBlockPos());
+        }
+    }
+
+    // Encoder
+    public void toBytes(FriendlyByteBuf buf) {
+        buf.writeBlockPos(selectedWheel);
+
+        // Write valid targets
+        buf.writeInt(validTargets.size());
+        for (BlockPos pos : validTargets) {
+            buf.writeBlockPos(pos);
         }
 
-        return new StartLinkingPacket(selected, valid, invalid);
+        // Write invalid targets
+        buf.writeInt(invalidTargets.size());
+        for (BlockPos pos : invalidTargets) {
+            buf.writeBlockPos(pos);
+        }
     }
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
-    }
-
-    public static void handle(StartLinkingPacket packet, IPayloadContext context) {
+    // Handler
+    public boolean handle(Supplier<NetworkEvent.Context> supplier) {
+        NetworkEvent.Context context = supplier.get();
         context.enqueueWork(() -> {
-            // Client-side: Start highlighting with both valid and invalid targets
-            WheelHighlightRenderer.setSelectedWheel(
-                    packet.selectedWheel(),
-                    packet.validTargets(),
-                    packet.invalidTargets()
-            );
+            // Handle on client side
+            ClientPacketHandler.handleStartLinking(selectedWheel, validTargets, invalidTargets);
         });
+        context.setPacketHandled(true);
+        return true;
     }
 }

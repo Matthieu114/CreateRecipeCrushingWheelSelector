@@ -1,68 +1,88 @@
 package com.enormeboze.crushingwheelrecipeselector.network;
 
 import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.neoforge.network.registration.PayloadRegistrar;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.network.NetworkDirection;
+import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.network.simple.SimpleChannel;
 
 public class ModNetworking {
 
-    public static void register(IEventBus modEventBus) {
-        modEventBus.addListener(ModNetworking::registerPayloads);
+    private static SimpleChannel INSTANCE;
+
+    private static int packetId = 0;
+    private static int id() {
+        return packetId++;
     }
 
-    private static void registerPayloads(RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar registrar = event.registrar(CrushingWheelRecipeSelector.MOD_ID);
+    public static void register() {
+        SimpleChannel net = NetworkRegistry.ChannelBuilder
+                .named(new ResourceLocation(CrushingWheelRecipeSelector.MOD_ID, "messages"))
+                .networkProtocolVersion(() -> "1.0")
+                .clientAcceptedVersions(s -> true)
+                .serverAcceptedVersions(s -> true)
+                .simpleChannel();
 
-        // Client -> Server: Request to open GUI
-        registrar.playToServer(
-                RequestOpenGuiPacket.TYPE,
-                RequestOpenGuiPacket.STREAM_CODEC,
-                RequestOpenGuiPacket::handle
-        );
+        INSTANCE = net;
 
-        // Client -> Server: Select a recipe
-        registrar.playToServer(
-                SelectRecipePacket.TYPE,
-                SelectRecipePacket.STREAM_CODEC,
-                SelectRecipePacket::handle
-        );
+        // Client -> Server packets
+        net.messageBuilder(RequestOpenGuiPacket.class, id(), NetworkDirection.PLAY_TO_SERVER)
+                .decoder(RequestOpenGuiPacket::new)
+                .encoder(RequestOpenGuiPacket::toBytes)
+                .consumerMainThread(RequestOpenGuiPacket::handle)
+                .add();
 
-        // Client -> Server: Clear a recipe selection
-        registrar.playToServer(
-                ClearRecipePacket.TYPE,
-                ClearRecipePacket.STREAM_CODEC,
-                ClearRecipePacket::handle
-        );
+        net.messageBuilder(SelectRecipePacket.class, id(), NetworkDirection.PLAY_TO_SERVER)
+                .decoder(SelectRecipePacket::new)
+                .encoder(SelectRecipePacket::toBytes)
+                .consumerMainThread(SelectRecipePacket::handle)
+                .add();
 
-        // Server -> Client: Sync selections (and optionally open GUI)
-        registrar.playToClient(
-                SyncSelectionsPacket.TYPE,
-                SyncSelectionsPacket.STREAM_CODEC,
-                SyncSelectionsPacket::handleSyncSelections
-        );
+        net.messageBuilder(ClearRecipePacket.class, id(), NetworkDirection.PLAY_TO_SERVER)
+                .decoder(ClearRecipePacket::new)
+                .encoder(ClearRecipePacket::toBytes)
+                .consumerMainThread(ClearRecipePacket::handle)
+                .add();
 
-        // Server -> Client: Start linking (show highlights)
-        registrar.playToClient(
-                StartLinkingPacket.TYPE,
-                StartLinkingPacket.STREAM_CODEC,
-                StartLinkingPacket::handle
-        );
+        // Server -> Client packets
+        net.messageBuilder(SyncSelectionsPacket.class, id(), NetworkDirection.PLAY_TO_CLIENT)
+                .decoder(SyncSelectionsPacket::new)
+                .encoder(SyncSelectionsPacket::toBytes)
+                .consumerMainThread(SyncSelectionsPacket::handle)
+                .add();
 
-        // Server -> Client: Cancel linking (clear highlights)
-        registrar.playToClient(
-                CancelLinkingPacket.TYPE,
-                CancelLinkingPacket.STREAM_CODEC,
-                CancelLinkingPacket::handle
-        );
+        net.messageBuilder(StartLinkingPacket.class, id(), NetworkDirection.PLAY_TO_CLIENT)
+                .decoder(StartLinkingPacket::new)
+                .encoder(StartLinkingPacket::toBytes)
+                .consumerMainThread(StartLinkingPacket::handle)
+                .add();
 
-        // Server -> Client: Link result (success/error particles)
-        registrar.playToClient(
-                LinkResultPacket.TYPE,
-                LinkResultPacket.STREAM_CODEC,
-                LinkResultPacket::handle
-        );
+        net.messageBuilder(CancelLinkingPacket.class, id(), NetworkDirection.PLAY_TO_CLIENT)
+                .decoder(CancelLinkingPacket::new)
+                .encoder(CancelLinkingPacket::toBytes)
+                .consumerMainThread(CancelLinkingPacket::handle)
+                .add();
+
+        net.messageBuilder(LinkResultPacket.class, id(), NetworkDirection.PLAY_TO_CLIENT)
+                .decoder(LinkResultPacket::new)
+                .encoder(LinkResultPacket::toBytes)
+                .consumerMainThread(LinkResultPacket::handle)
+                .add();
 
         CrushingWheelRecipeSelector.LOGGER.info("Network packets registered");
+    }
+
+    public static void sendToServer(Object msg) {
+        INSTANCE.sendToServer(msg);
+    }
+
+    public static void sendToPlayer(ServerPlayer player, Object msg) {
+        INSTANCE.send(PacketDistributor.PLAYER.with(() -> player), msg);
+    }
+
+    public static void sendToAllPlayers(Object msg) {
+        INSTANCE.send(PacketDistributor.ALL.noArg(), msg);
     }
 }

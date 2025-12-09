@@ -1,60 +1,50 @@
 package com.enormeboze.crushingwheelrecipeselector.network;
 
-import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
-import com.enormeboze.crushingwheelrecipeselector.client.LinkingParticles;
-import com.enormeboze.crushingwheelrecipeselector.client.WheelHighlightRenderer;
+import com.enormeboze.crushingwheelrecipeselector.client.ClientPacketHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.ResourceLocation;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.minecraftforge.network.NetworkEvent;
+
+import java.util.function.Supplier;
 
 /**
  * Sent from server to client when linking succeeds or fails
  * Triggers appropriate particle effects
  */
-public record LinkResultPacket(
-        boolean success,
-        BlockPos pos1,
-        BlockPos pos2  // Only used if success=true
-) implements CustomPacketPayload {
+public class LinkResultPacket {
 
-    public static final CustomPacketPayload.Type<LinkResultPacket> TYPE =
-            new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(CrushingWheelRecipeSelector.MOD_ID, "link_result"));
+    private final boolean success;
+    private final BlockPos pos1;
+    private final BlockPos pos2;
 
-    public static final StreamCodec<FriendlyByteBuf, LinkResultPacket> STREAM_CODEC =
-            StreamCodec.of(LinkResultPacket::write, LinkResultPacket::read);
-
-    public static void write(FriendlyByteBuf buf, LinkResultPacket packet) {
-        buf.writeBoolean(packet.success);
-        buf.writeBlockPos(packet.pos1);
-        buf.writeBlockPos(packet.pos2);
+    public LinkResultPacket(boolean success, BlockPos pos1, BlockPos pos2) {
+        this.success = success;
+        this.pos1 = pos1;
+        this.pos2 = pos2;
     }
 
-    public static LinkResultPacket read(FriendlyByteBuf buf) {
-        boolean success = buf.readBoolean();
-        BlockPos pos1 = buf.readBlockPos();
-        BlockPos pos2 = buf.readBlockPos();
-        return new LinkResultPacket(success, pos1, pos2);
+    // Decoder constructor
+    public LinkResultPacket(FriendlyByteBuf buf) {
+        this.success = buf.readBoolean();
+        this.pos1 = buf.readBlockPos();
+        this.pos2 = buf.readBlockPos();
     }
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    // Encoder
+    public void toBytes(FriendlyByteBuf buf) {
+        buf.writeBoolean(success);
+        buf.writeBlockPos(pos1);
+        buf.writeBlockPos(pos2);
     }
 
-    public static void handle(LinkResultPacket packet, IPayloadContext context) {
+    // Handler
+    public boolean handle(Supplier<NetworkEvent.Context> supplier) {
+        NetworkEvent.Context context = supplier.get();
         context.enqueueWork(() -> {
-            // Clear highlighting
-            WheelHighlightRenderer.clearSelection();
-            
-            // Spawn appropriate particles
-            if (packet.success()) {
-                LinkingParticles.spawnLinkSuccessParticles(packet.pos1(), packet.pos2());
-            } else {
-                LinkingParticles.spawnLinkErrorParticles(packet.pos1());
-            }
+            // Handle on client side
+            ClientPacketHandler.handleLinkResult(success, pos1, pos2);
         });
+        context.setPacketHandled(true);
+        return true;
     }
 }

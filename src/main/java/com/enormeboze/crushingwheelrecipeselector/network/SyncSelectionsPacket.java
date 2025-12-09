@@ -1,67 +1,67 @@
 package com.enormeboze.crushingwheelrecipeselector.network;
 
-import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
-import com.enormeboze.crushingwheelrecipeselector.client.ClientScreenHelper;
-import com.enormeboze.crushingwheelrecipeselector.client.ClientSelectionCache;
+import com.enormeboze.crushingwheelrecipeselector.client.ClientPacketHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.minecraftforge.network.NetworkEvent;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 
-public record SyncSelectionsPacket(
-        BlockPos wheelPos,
-        Map<String, ResourceLocation> selections,
-        boolean openGui  // Flag to control whether to open GUI after sync
-) implements CustomPacketPayload {
+/**
+ * Sent from server to client to sync selections and optionally open GUI
+ */
+public class SyncSelectionsPacket {
 
-    public static final CustomPacketPayload.Type<SyncSelectionsPacket> TYPE =
-            new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(CrushingWheelRecipeSelector.MOD_ID, "sync_selections"));
+    private final BlockPos wheelPos;
+    private final Map<String, ResourceLocation> selections;
+    private final boolean openGui;
 
-    public static final StreamCodec<FriendlyByteBuf, SyncSelectionsPacket> STREAM_CODEC =
-            StreamCodec.of(SyncSelectionsPacket::write, SyncSelectionsPacket::read);
-
-    public static void write(FriendlyByteBuf buf, SyncSelectionsPacket packet) {
-        buf.writeBlockPos(packet.wheelPos);
-        buf.writeInt(packet.selections.size());
-        for (Map.Entry<String, ResourceLocation> entry : packet.selections.entrySet()) {
-            buf.writeUtf(entry.getKey());
-            buf.writeResourceLocation(entry.getValue());
-        }
-        buf.writeBoolean(packet.openGui);
+    public SyncSelectionsPacket(BlockPos wheelPos, Map<String, ResourceLocation> selections, boolean openGui) {
+        this.wheelPos = wheelPos;
+        this.selections = selections;
+        this.openGui = openGui;
     }
 
-    public static SyncSelectionsPacket read(FriendlyByteBuf buf) {
-        BlockPos pos = buf.readBlockPos();
+    // Decoder constructor
+    public SyncSelectionsPacket(FriendlyByteBuf buf) {
+        this.wheelPos = buf.readBlockPos();
         int size = buf.readInt();
-        Map<String, ResourceLocation> selections = new HashMap<>();
+        this.selections = new HashMap<>();
         for (int i = 0; i < size; i++) {
             String key = buf.readUtf();
             ResourceLocation value = buf.readResourceLocation();
             selections.put(key, value);
         }
-        boolean openGui = buf.readBoolean();
-        return new SyncSelectionsPacket(pos, selections, openGui);
+        this.openGui = buf.readBoolean();
     }
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    // Encoder
+    public void toBytes(FriendlyByteBuf buf) {
+        buf.writeBlockPos(wheelPos);
+        buf.writeInt(selections.size());
+        for (Map.Entry<String, ResourceLocation> entry : selections.entrySet()) {
+            buf.writeUtf(entry.getKey());
+            buf.writeResourceLocation(entry.getValue());
+        }
+        buf.writeBoolean(openGui);
     }
 
-    public static void handleSyncSelections(SyncSelectionsPacket packet, IPayloadContext context) {
+    // Handler
+    public boolean handle(Supplier<NetworkEvent.Context> supplier) {
+        NetworkEvent.Context context = supplier.get();
         context.enqueueWork(() -> {
-            // Always update cache
-            ClientSelectionCache.updateSelections(packet.wheelPos(), packet.selections());
-
-            // Only open GUI if requested
-            if (packet.openGui()) {
-                ClientScreenHelper.openRecipeSelectorScreen(packet.wheelPos());
-            }
+            // Handle on client side
+            ClientPacketHandler.handleSyncSelections(wheelPos, selections, openGui);
         });
+        context.setPacketHandled(true);
+        return true;
     }
+
+    // Getters for client handler
+    public BlockPos getWheelPos() { return wheelPos; }
+    public Map<String, ResourceLocation> getSelections() { return selections; }
+    public boolean shouldOpenGui() { return openGui; }
 }

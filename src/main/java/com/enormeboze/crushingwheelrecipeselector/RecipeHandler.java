@@ -5,19 +5,19 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.RecipesUpdatedEvent;
-import net.neoforged.neoforge.event.level.LevelEvent;
-import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.minecraftforge.client.event.RecipesUpdatedEvent;
+import net.minecraftforge.event.level.LevelEvent;
+import net.minecraftforge.event.server.ServerStoppingEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
-@EventBusSubscriber(modid = CrushingWheelRecipeSelector.MOD_ID)
+@Mod.EventBusSubscriber(modid = CrushingWheelRecipeSelector.MOD_ID)
 public class RecipeHandler {
 
     // Cache of conflicting recipes per input item ID
@@ -87,19 +87,19 @@ public class RecipeHandler {
     private static void scanForConflicts(RecipeManager recipeManager, RegistryAccess registryAccess) {
         conflictingRecipes.clear();
 
-        // Get all recipes and filter for Create crushing recipes
-        var allRecipes = recipeManager.getRecipes();
+        // Get all recipes - in 1.20.1 this returns Collection<Recipe<?>> directly (no RecipeHolder)
+        Collection<Recipe<?>> allRecipes = recipeManager.getRecipes();
 
         int totalRecipes = 0;
         int crushingRecipes = 0;
 
         // Group recipes by their input item
-        Map<String, List<RecipeHolder<CrushingRecipe>>> crushingRecipesByInput = new HashMap<>();
+        Map<String, List<CrushingRecipe>> crushingRecipesByInput = new HashMap<>();
 
-        for (RecipeHolder<?> recipeHolder : allRecipes) {
+        for (Recipe<?> recipe : allRecipes) {
             totalRecipes++;
             // Check if this is specifically a Create crushing recipe
-            if (recipeHolder.value() instanceof CrushingRecipe crushingRecipe) {
+            if (recipe instanceof CrushingRecipe crushingRecipe) {
                 crushingRecipes++;
                 try {
                     // Get the recipe's ingredients
@@ -111,14 +111,12 @@ public class RecipeHandler {
 
                         for (ItemStack item : items) {
                             String itemId = getItemId(item);
-                            @SuppressWarnings("unchecked")
-                            RecipeHolder<CrushingRecipe> typedHolder = (RecipeHolder<CrushingRecipe>) recipeHolder;
                             crushingRecipesByInput.computeIfAbsent(itemId, k -> new ArrayList<>())
-                                    .add(typedHolder);
+                                    .add(crushingRecipe);
                         }
                     }
                 } catch (Exception e) {
-                    CrushingWheelRecipeSelector.LOGGER.error("Error processing recipe: {}", recipeHolder.id(), e);
+                    CrushingWheelRecipeSelector.LOGGER.error("Error processing recipe: {}", recipe.getId(), e);
                 }
             }
         }
@@ -127,14 +125,14 @@ public class RecipeHandler {
                 totalRecipes, crushingRecipes, crushingRecipesByInput.size());
 
         // Find conflicts (items with more than one recipe WITH DIFFERENT OUTPUTS)
-        for (Map.Entry<String, List<RecipeHolder<CrushingRecipe>>> entry : crushingRecipesByInput.entrySet()) {
+        for (Map.Entry<String, List<CrushingRecipe>> entry : crushingRecipesByInput.entrySet()) {
             if (entry.getValue().size() > 1) {
                 // Get all recipes with their outputs
                 List<RecipeConflict> allConflicts = entry.getValue().stream()
-                        .map(holder -> new RecipeConflict(
-                                holder.id(),
-                                getRecipeOutputs(holder, registryAccess),
-                                getOutputSignature(holder, registryAccess)
+                        .map(recipe -> new RecipeConflict(
+                                recipe.getId(),
+                                getRecipeOutputs(recipe, registryAccess),
+                                getOutputSignature(recipe, registryAccess)
                         ))
                         .collect(Collectors.toList());
 
@@ -200,12 +198,10 @@ public class RecipeHandler {
      * Create a signature string representing all outputs of a recipe
      * Used to detect recipes with identical outputs
      */
-    private static String getOutputSignature(RecipeHolder<CrushingRecipe> holder, RegistryAccess registryAccess) {
+    private static String getOutputSignature(CrushingRecipe recipe, RegistryAccess registryAccess) {
         List<String> outputParts = new ArrayList<>();
 
         try {
-            CrushingRecipe recipe = holder.value();
-
             // Get the main result
             ItemStack result = recipe.getResultItem(registryAccess);
             if (!result.isEmpty()) {
@@ -231,15 +227,13 @@ public class RecipeHandler {
     }
 
     private static String getItemId(ItemStack stack) {
-        ResourceLocation registryName = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+        ResourceLocation registryName = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
         return registryName.toString();
     }
 
-    private static List<String> getRecipeOutputs(RecipeHolder<CrushingRecipe> holder, RegistryAccess registryAccess) {
+    private static List<String> getRecipeOutputs(CrushingRecipe recipe, RegistryAccess registryAccess) {
         List<String> outputs = new ArrayList<>();
         try {
-            CrushingRecipe recipe = holder.value();
-
             // Get the main result
             ItemStack result = recipe.getResultItem(registryAccess);
             if (!result.isEmpty()) {

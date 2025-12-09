@@ -9,100 +9,46 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
-import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.event.RenderLevelStageEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
 
 import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Renders visual highlights on crushing wheels during the linking process.
- *
- * - Green outline: Selected wheel
- * - Light green outline + connection line: Valid link targets
- * - Red outline: Invalid link targets (wrong axis, too far, etc.)
+ * Renders highlight boxes around crushing wheels during the linking process.
+ * Green = selected wheel + valid targets
+ * Red = invalid nearby wheels (wrong axis, wrong distance)
  */
 @OnlyIn(Dist.CLIENT)
-@EventBusSubscriber(modid = CrushingWheelRecipeSelector.MOD_ID, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = "crushingwheelrecipeselector", value = Dist.CLIENT)
 public class WheelHighlightRenderer {
 
-    // Currently selected wheel (first wheel in linking process)
     private static BlockPos selectedWheel = null;
-
-    // Valid link targets (can be linked - green)
     private static Set<BlockPos> validTargets = new HashSet<>();
-
-    // Invalid link targets (nearby but can't be linked - red)
     private static Set<BlockPos> invalidTargets = new HashSet<>();
 
-    // Timestamp for animation
-    private static long selectionStartTime = 0;
-
-    /**
-     * Set the selected wheel and targets.
-     * Called when receiving StartLinkingPacket from server.
-     *
-     * @param pos The selected wheel position
-     * @param valid Valid link targets (green highlight)
-     * @param invalid Invalid link targets (red highlight)
-     */
-    public static void setSelectedWheel(BlockPos pos, Set<BlockPos> valid, Set<BlockPos> invalid) {
-        selectedWheel = pos;
-        selectionStartTime = System.currentTimeMillis();
-        validTargets.clear();
-        invalidTargets.clear();
-
-        if (valid != null) {
-            validTargets.addAll(valid);
-        }
-        if (invalid != null) {
-            invalidTargets.addAll(invalid);
-        }
+    public static void setSelectedWheel(BlockPos wheel, Set<BlockPos> valid, Set<BlockPos> invalid) {
+        selectedWheel = wheel;
+        validTargets = new HashSet<>(valid);
+        invalidTargets = new HashSet<>(invalid);
     }
 
-    /**
-     * Clear all highlights
-     */
     public static void clearSelection() {
         selectedWheel = null;
         validTargets.clear();
         invalidTargets.clear();
     }
 
-    /**
-     * Check if the selected wheel is set
-     */
     public static boolean hasSelection() {
         return selectedWheel != null;
     }
 
-    /**
-     * Get the selected wheel position
-     */
-    public static BlockPos getSelectedWheel() {
-        return selectedWheel;
-    }
-
-    /**
-     * Check if a position is a valid link target
-     */
-    public static boolean isValidTarget(BlockPos pos) {
-        return validTargets.contains(pos);
-    }
-
-    /**
-     * Check if a position is an invalid link target
-     */
-    public static boolean isInvalidTarget(BlockPos pos) {
-        return invalidTargets.contains(pos);
-    }
-
     @SubscribeEvent
-    public static void onRenderLevelStage(RenderLevelStageEvent event) {
+    public static void onRenderLevel(RenderLevelStageEvent event) {
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
             return;
         }
@@ -117,100 +63,65 @@ public class WheelHighlightRenderer {
         }
 
         PoseStack poseStack = event.getPoseStack();
-        Vec3 camera = event.getCamera().getPosition();
+        Vec3 cameraPos = event.getCamera().getPosition();
 
         MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
+        VertexConsumer lineConsumer = bufferSource.getBuffer(RenderType.lines());
 
-        // Calculate pulse animation (0.0 to 1.0)
-        float time = (System.currentTimeMillis() - selectionStartTime) / 1000f;
-        float pulse = (float) (0.5 + 0.5 * Math.sin(time * 4)); // Pulsing effect
+        poseStack.pushPose();
+        poseStack.translate(-cameraPos.x, -cameraPos.y, -cameraPos.z);
 
-        // Render selected wheel (bright green)
-        renderWheelHighlight(poseStack, bufferSource, camera, selectedWheel,
-                0.2f, 1.0f, 0.2f, 0.4f + 0.3f * pulse); // Green with pulse
+        // Render selected wheel (green)
+        renderHighlightBox(poseStack, lineConsumer, selectedWheel, 0.0f, 1.0f, 0.0f, 1.0f);
 
-        // Render valid targets (lighter green with connection lines)
-        for (BlockPos validPos : validTargets) {
-            renderWheelHighlight(poseStack, bufferSource, camera, validPos,
-                    0.3f, 0.9f, 0.3f, 0.3f + 0.2f * pulse); // Lighter green
+        // Render valid targets (green with animated connection lines)
+        float time = (System.currentTimeMillis() % 2000) / 2000.0f;
+        float pulse = 0.6f + 0.4f * (float) Math.sin(time * Math.PI * 2);
 
-            // Render connection line to show the link path
-            renderConnectionEffect(poseStack, bufferSource, camera, selectedWheel, validPos,
-                    0.3f, 1.0f, 0.3f, 0.5f, time);
+        for (BlockPos target : validTargets) {
+            renderHighlightBox(poseStack, lineConsumer, target, 0.0f, pulse, 0.0f, 0.8f);
+            renderConnectionLine(poseStack, lineConsumer, selectedWheel, target, 0.0f, 1.0f, 0.0f, pulse);
         }
 
         // Render invalid targets (red)
-        for (BlockPos invalidPos : invalidTargets) {
-            renderWheelHighlight(poseStack, bufferSource, camera, invalidPos,
-                    1.0f, 0.2f, 0.2f, 0.3f + 0.2f * pulse); // Red
+        for (BlockPos invalid : invalidTargets) {
+            renderHighlightBox(poseStack, lineConsumer, invalid, 1.0f, 0.0f, 0.0f, 0.6f);
         }
 
-        // If no valid targets, show a subtle yellow indicator on the selected wheel
+        // If no valid targets, render yellow warning on selected wheel
         if (validTargets.isEmpty()) {
-            renderWheelHighlight(poseStack, bufferSource, camera, selectedWheel,
-                    1.0f, 0.8f, 0.2f, 0.2f * pulse); // Yellow overlay
+            renderHighlightBox(poseStack, lineConsumer, selectedWheel, 1.0f, 1.0f, 0.0f, pulse);
         }
 
-        bufferSource.endBatch();
+        poseStack.popPose();
+
+        bufferSource.endBatch(RenderType.lines());
     }
 
-    private static void renderWheelHighlight(PoseStack poseStack, MultiBufferSource bufferSource,
-                                             Vec3 camera, BlockPos pos, float r, float g, float b, float a) {
-
-        poseStack.pushPose();
-        poseStack.translate(-camera.x, -camera.y, -camera.z);
-
-        // Create slightly expanded bounding box for the highlight
-        AABB box = new AABB(pos).inflate(0.02);
-
-        VertexConsumer consumer = bufferSource.getBuffer(RenderType.lines());
-
-        // Render the outline box
+    private static void renderHighlightBox(PoseStack poseStack, VertexConsumer consumer,
+                                           BlockPos pos, float r, float g, float b, float a) {
+        AABB box = new AABB(pos).inflate(0.002);
         LevelRenderer.renderLineBox(poseStack, consumer, box, r, g, b, a);
-
-        poseStack.popPose();
     }
 
-    private static void renderConnectionEffect(PoseStack poseStack, MultiBufferSource bufferSource,
-                                               Vec3 camera, BlockPos from, BlockPos to, float r, float g, float b, float a, float time) {
+    private static void renderConnectionLine(PoseStack poseStack, VertexConsumer consumer,
+                                             BlockPos from, BlockPos to, float r, float g, float b, float a) {
+        Vec3 start = Vec3.atCenterOf(from);
+        Vec3 end = Vec3.atCenterOf(to);
 
-        poseStack.pushPose();
-        poseStack.translate(-camera.x, -camera.y, -camera.z);
+        Vec3 dir = end.subtract(start).normalize();
+        float nx = (float) dir.x;
+        float ny = (float) dir.y;
+        float nz = (float) dir.z;
 
-        VertexConsumer consumer = bufferSource.getBuffer(RenderType.lines());
+        consumer.vertex(poseStack.last().pose(), (float) start.x, (float) start.y, (float) start.z)
+                .color(r, g, b, a)
+                .normal(poseStack.last().normal(), nx, ny, nz)
+                .endVertex();
 
-        // Get center points of both blocks
-        Vec3 fromCenter = Vec3.atCenterOf(from);
-        Vec3 toCenter = Vec3.atCenterOf(to);
-
-        // Draw animated dashed line between wheels
-        int segments = 8;
-        float segmentProgress = (time * 2) % 1.0f; // Animated dash movement
-
-        PoseStack.Pose pose = poseStack.last();
-
-        for (int i = 0; i < segments; i++) {
-            float startT = (i + segmentProgress) / segments;
-            float endT = (i + 0.5f + segmentProgress) / segments;
-
-            if (startT > 1.0f) startT -= 1.0f;
-            if (endT > 1.0f) endT -= 1.0f;
-            if (startT > endT) continue; // Skip wrap-around segments
-
-            Vec3 start = fromCenter.lerp(toCenter, startT);
-            Vec3 end = fromCenter.lerp(toCenter, endT);
-
-            // Calculate direction for normal
-            Vec3 dir = end.subtract(start).normalize();
-
-            consumer.addVertex(pose.pose(), (float) start.x, (float) start.y, (float) start.z)
-                    .setColor(r, g, b, a)
-                    .setNormal(pose, (float) dir.x, (float) dir.y, (float) dir.z);
-            consumer.addVertex(pose.pose(), (float) end.x, (float) end.y, (float) end.z)
-                    .setColor(r, g, b, a)
-                    .setNormal(pose, (float) dir.x, (float) dir.y, (float) dir.z);
-        }
-
-        poseStack.popPose();
+        consumer.vertex(poseStack.last().pose(), (float) end.x, (float) end.y, (float) end.z)
+                .color(r, g, b, a)
+                .normal(poseStack.last().normal(), nx, ny, nz)
+                .endVertex();
     }
 }
