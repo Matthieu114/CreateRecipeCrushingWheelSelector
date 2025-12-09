@@ -94,22 +94,25 @@ configurations {
 }
 
 dependencies {
-    // Create and its dependencies
+    // Create and its dependencies (REQUIRED)
     implementation "maven.modrinth:create:1.21.1-6.0.6"
     implementation "net.createmod.ponder:Ponder-NeoForge-${minecraft_version}:${ponder_version}"
     implementation "com.tterrag.registrate:Registrate:${registrate_version}"
 
-    // JEI - Just Enough Items
+    // JEI - Just Enough Items (optional, for testing only)
     localRuntime "curse.maven:jei-238222:7270455"
 
-    // Create: Aquatic Ambitions
-    implementation "maven.modrinth:create-aquatic-ambitions:1.21.1-6.0.6-2.0.1"
+    // === TEST MODS FOR CONFLICT DETECTION ===
+    // These add conflicting crushing recipes - remove before release if desired
 
-    // Create: The Factory Must Grow
-    implementation "maven.modrinth:create-tfmg:1.1.0c"
+    // Create: The Factory Must Grow (adds industrial crushing recipes)
+    localRuntime "maven.modrinth:create-tfmg:1.1.0c"
 
-    // Create: Garnished (pre-rework version) - FIXED: removed -neoforged suffix
-    implementation "maven.modrinth:create-garnished:2.1.6.6+1.21.1"
+    // Create: Garnished (adds food crushing recipes)
+    localRuntime "maven.modrinth:create-garnished:2.1.6.6+1.21.1"
+
+    // Create: Aquatic Ambitions (adds aquatic crushing recipes)
+    localRuntime "maven.modrinth:create-aquatic-ambitions:1.21.1-6.0.6-2.0.1"
 }
 
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {

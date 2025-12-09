@@ -1,6 +1,7 @@
 package com.enormeboze.crushingwheelrecipeselector;
 
 import com.simibubi.create.content.kinetics.crusher.CrushingRecipe;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -9,7 +10,9 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.RecipesUpdatedEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -23,15 +26,26 @@ public class RecipeHandler {
     // Flag to track if we've already scanned
     private static boolean hasScanned = false;
 
+    // Store registry access for later use
+    private static RegistryAccess cachedRegistryAccess = null;
+
+    /**
+     * Clean up when server stops to prevent memory leaks
+     */
+    @SubscribeEvent
+    public static void onServerStopping(ServerStoppingEvent event) {
+        hasScanned = false;
+        conflictingRecipes.clear();
+        cachedRegistryAccess = null;
+        CrushingWheelRecipeSelector.LOGGER.debug("Cleared recipe cache on server stop");
+    }
+
     @SubscribeEvent
     public static void onWorldLoad(LevelEvent.Load event) {
         if (event.getLevel() instanceof Level level && !level.isClientSide()) {
-            // Only scan once per world load
-            if (!hasScanned) {
-                CrushingWheelRecipeSelector.LOGGER.info("World loaded, scanning for conflicting crushing recipes...");
-                scanForConflicts(level.getRecipeManager(), level.registryAccess());
-                hasScanned = true;
-            }
+            cachedRegistryAccess = level.registryAccess();
+            // Don't scan here - wait for recipes to be fully loaded
+            CrushingWheelRecipeSelector.LOGGER.info("World loaded, waiting for recipes to be ready...");
         }
     }
 
@@ -41,8 +55,33 @@ public class RecipeHandler {
             // Reset when world unloads so we rescan on next world
             hasScanned = false;
             conflictingRecipes.clear();
+            cachedRegistryAccess = null;
             CrushingWheelRecipeSelector.LOGGER.info("World unloaded, clearing recipe cache");
         }
+    }
+
+    /**
+     * Called when recipes are synced to client - this is when all mod recipes are available
+     */
+    @SubscribeEvent
+    public static void onRecipesUpdated(RecipesUpdatedEvent event) {
+        // This fires on the CLIENT when recipes are synced from server
+        // All mod recipes should be available now
+        CrushingWheelRecipeSelector.LOGGER.info("Recipes updated event fired, scanning for conflicts...");
+
+        RecipeManager recipeManager = event.getRecipeManager();
+        if (Minecraft.getInstance().level != null) {
+            scanForConflicts(recipeManager, Minecraft.getInstance().level.registryAccess());
+        }
+    }
+
+    /**
+     * Force a rescan of recipes - can be called manually if needed
+     */
+    public static void forceRescan(Level level) {
+        hasScanned = false;
+        CrushingWheelRecipeSelector.LOGGER.info("Forcing recipe rescan...");
+        scanForConflicts(level.getRecipeManager(), level.registryAccess());
     }
 
     private static void scanForConflicts(RecipeManager recipeManager, RegistryAccess registryAccess) {
@@ -51,12 +90,17 @@ public class RecipeHandler {
         // Get all recipes and filter for Create crushing recipes
         var allRecipes = recipeManager.getRecipes();
 
+        int totalRecipes = 0;
+        int crushingRecipes = 0;
+
         // Group recipes by their input item
         Map<String, List<RecipeHolder<CrushingRecipe>>> crushingRecipesByInput = new HashMap<>();
 
         for (RecipeHolder<?> recipeHolder : allRecipes) {
+            totalRecipes++;
             // Check if this is specifically a Create crushing recipe
             if (recipeHolder.value() instanceof CrushingRecipe crushingRecipe) {
+                crushingRecipes++;
                 try {
                     // Get the recipe's ingredients
                     var ingredients = crushingRecipe.getIngredients();
@@ -78,6 +122,9 @@ public class RecipeHandler {
                 }
             }
         }
+
+        CrushingWheelRecipeSelector.LOGGER.info("Scanned {} total recipes, found {} crushing recipes for {} unique items",
+                totalRecipes, crushingRecipes, crushingRecipesByInput.size());
 
         // Find conflicts (items with more than one recipe WITH DIFFERENT OUTPUTS)
         for (Map.Entry<String, List<RecipeHolder<CrushingRecipe>>> entry : crushingRecipesByInput.entrySet()) {
@@ -112,11 +159,19 @@ public class RecipeHandler {
             }
         }
 
+        hasScanned = true;
+
         if (conflictingRecipes.isEmpty()) {
-            CrushingWheelRecipeSelector.LOGGER.info("No conflicting crushing recipes found (after filtering duplicates).");
+            CrushingWheelRecipeSelector.LOGGER.warn("No conflicting crushing recipes found! This might indicate an issue.");
+            CrushingWheelRecipeSelector.LOGGER.warn("  - Total recipes scanned: {}", totalRecipes);
+            CrushingWheelRecipeSelector.LOGGER.warn("  - Crushing recipes found: {}", crushingRecipes);
+            CrushingWheelRecipeSelector.LOGGER.warn("  - Unique input items: {}", crushingRecipesByInput.size());
         } else {
-            CrushingWheelRecipeSelector.LOGGER.info("Found {} items with unique conflicting recipes.",
+            CrushingWheelRecipeSelector.LOGGER.info("=== Found {} items with conflicting recipes ===",
                     conflictingRecipes.size());
+            for (String itemId : conflictingRecipes.keySet()) {
+                CrushingWheelRecipeSelector.LOGGER.info("  - {}: {} recipes", itemId, conflictingRecipes.get(itemId).size());
+            }
         }
     }
 
@@ -207,14 +262,20 @@ public class RecipeHandler {
     }
 
     /**
-     * Get cached conflicting recipes - no refetching
+     * Get cached conflicting recipes - returns unmodifiable view (no copy)
      */
     public static Map<String, List<RecipeConflict>> getConflictingRecipes() {
-        return new HashMap<>(conflictingRecipes);
+        return Collections.unmodifiableMap(conflictingRecipes);
     }
 
+    /**
+     * Get conflicts for a specific item - returns empty list constant if not found
+     */
+    private static final List<RecipeConflict> EMPTY_CONFLICTS = Collections.emptyList();
+
     public static List<RecipeConflict> getConflictsForItem(String itemId) {
-        return conflictingRecipes.getOrDefault(itemId, new ArrayList<>());
+        List<RecipeConflict> conflicts = conflictingRecipes.get(itemId);
+        return conflicts != null ? conflicts : EMPTY_CONFLICTS;
     }
 
     /**

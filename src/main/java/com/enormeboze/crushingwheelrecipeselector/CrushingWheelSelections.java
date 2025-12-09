@@ -11,6 +11,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -164,17 +165,19 @@ public class CrushingWheelSelections extends SavedData {
         }
     }
 
+    private static final Map<String, ResourceLocation> EMPTY_PREFERENCES = Collections.emptyMap();
+
     /**
-     * Get all preferences for a wheel's group
+     * Get all preferences for a wheel's group - returns unmodifiable view
      */
     public Map<String, ResourceLocation> getAllPreferences(BlockPos wheelPos) {
         UUID groupId = wheelGroups.get(wheelPos);
         if (groupId == null) {
-            return new HashMap<>();
+            return EMPTY_PREFERENCES;
         }
 
         Map<String, ResourceLocation> prefs = groupPreferences.get(groupId);
-        return prefs != null ? new HashMap<>(prefs) : new HashMap<>();
+        return prefs != null ? Collections.unmodifiableMap(prefs) : EMPTY_PREFERENCES;
     }
 
     // ==================== PERSISTENCE ====================

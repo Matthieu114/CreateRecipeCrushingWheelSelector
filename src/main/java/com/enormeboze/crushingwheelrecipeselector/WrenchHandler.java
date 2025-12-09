@@ -15,7 +15,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.HashMap;
@@ -37,6 +39,27 @@ public class WrenchHandler {
 
     // Pending link starts: Player UUID -> First wheel position
     private static final Map<UUID, BlockPos> pendingLinks = new HashMap<>();
+
+    /**
+     * Clean up when server stops to prevent memory leaks
+     */
+    @SubscribeEvent
+    public static void onServerStopping(ServerStoppingEvent event) {
+        pendingLinks.clear();
+        CrushingWheelRecipeSelector.LOGGER.debug("Cleared pending links on server stop");
+    }
+
+    /**
+     * Clean up when player disconnects
+     */
+    @SubscribeEvent
+    public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        UUID playerId = event.getEntity().getUUID();
+        if (pendingLinks.remove(playerId) != null) {
+            CrushingWheelRecipeSelector.LOGGER.debug("Cleared pending link for disconnected player {}",
+                    event.getEntity().getName().getString());
+        }
+    }
 
     @SubscribeEvent
     public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {

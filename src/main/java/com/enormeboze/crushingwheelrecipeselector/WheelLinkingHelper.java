@@ -15,32 +15,36 @@ public class WheelLinkingHelper {
 
     // Maximum distance between wheels that can be linked (2 blocks = 1 block gap)
     public static final int MAX_LINK_DISTANCE = 2;
-    
-    // Search radius for finding nearby wheels
-    public static final int SEARCH_RADIUS = 10;
+
+    // Search radius for finding nearby wheels (only need to search close by for highlighting)
+    // Since max link distance is 2, we only need to search a small area
+    public static final int SEARCH_RADIUS = 5;
 
     /**
      * Find all crushing wheel positions within search radius of a position
+     * Optimized to only search a small area since link distance is limited
      */
     public static Set<BlockPos> findNearbyWheels(Level level, BlockPos center) {
         Set<BlockPos> wheels = new HashSet<>();
-        
+
+        // Only search within a reasonable area (much smaller than before)
+        // Wheels are typically at the same Y level or 1 block different
         for (int x = -SEARCH_RADIUS; x <= SEARCH_RADIUS; x++) {
-            for (int y = -SEARCH_RADIUS; y <= SEARCH_RADIUS; y++) {
+            for (int y = -2; y <= 2; y++) {  // Wheels are usually at same height
                 for (int z = -SEARCH_RADIUS; z <= SEARCH_RADIUS; z++) {
                     BlockPos checkPos = center.offset(x, y, z);
                     BlockState state = level.getBlockState(checkPos);
-                    
+
                     if (state.getBlock() instanceof CrushingWheelBlock) {
                         wheels.add(checkPos);
                     }
                 }
             }
         }
-        
+
         return wheels;
     }
-    
+
     /**
      * Check if two positions are within linking distance
      */
@@ -48,7 +52,7 @@ public class WheelLinkingHelper {
         double distance = Math.sqrt(pos1.distSqr(pos2));
         return distance <= MAX_LINK_DISTANCE;
     }
-    
+
     /**
      * Get a human-readable distance description
      */
