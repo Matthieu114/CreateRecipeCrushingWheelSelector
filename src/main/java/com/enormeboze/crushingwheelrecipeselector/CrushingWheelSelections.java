@@ -13,8 +13,10 @@ import net.minecraft.world.level.saveddata.SavedData;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -22,6 +24,13 @@ import java.util.UUID;
  *
  * Wheels are LINKED in pairs using a shared group UUID.
  * Linked wheels share recipe preferences.
+ *
+ * PERFORMANCE OPTIMIZATION:
+ * We cache controller positions (the block between linked wheel pairs) so that
+ * the mixin can do a single O(1) HashSet lookup to skip processing for unlinked wheels.
+ *
+ * Controller positions are calculated using axis-aware logic - the controller is
+ * always exactly at the midpoint between the two wheels along their shared axis.
  */
 public class CrushingWheelSelections extends SavedData {
 
@@ -33,7 +42,58 @@ public class CrushingWheelSelections extends SavedData {
     // Map: Group UUID -> Map<InputItemId, PreferredRecipeId>
     private final Map<UUID, Map<String, ResourceLocation>> groupPreferences = new HashMap<>();
 
+    // PERFORMANCE CACHE: Set of controller positions that have linked wheels nearby
+    // This allows the mixin to skip processing for unlinked wheels with a single HashSet lookup
+    // This is NOT persisted - it's rebuilt from wheelGroups on load and after any changes
+    private final Set<BlockPos> activeControllerPositions = new HashSet<>();
+
     public CrushingWheelSelections() {
+    }
+
+    // ==================== CONTROLLER CACHE ====================
+
+    /**
+     * Fast check for the mixin - returns true if this controller position
+     * is between linked crushing wheels.
+     *
+     * This is O(1) and allows unlinked wheels to skip all mixin processing.
+     */
+    public boolean isControllerActive(BlockPos controllerPos) {
+        return activeControllerPositions.contains(controllerPos);
+    }
+
+    /**
+     * Rebuild the controller position cache from wheel groups.
+     * Called after any link/unlink operation and after loading from NBT.
+     *
+     * Uses CrushingWheelPairHelper to calculate exact controller positions
+     * based on the midpoint between paired wheels.
+     */
+    private void rebuildControllerCache() {
+        activeControllerPositions.clear();
+
+        // Group wheels by their group UUID
+        Map<UUID, List<BlockPos>> wheelsByGroup = new HashMap<>();
+        for (Map.Entry<BlockPos, UUID> entry : wheelGroups.entrySet()) {
+            wheelsByGroup.computeIfAbsent(entry.getValue(), k -> new ArrayList<>(2))
+                    .add(entry.getKey());
+        }
+
+        // For each group with exactly 2 wheels, calculate the controller position
+        for (Map.Entry<UUID, List<BlockPos>> entry : wheelsByGroup.entrySet()) {
+            List<BlockPos> wheels = entry.getValue();
+            if (wheels.size() == 2) {
+                BlockPos wheel1 = wheels.get(0);
+                BlockPos wheel2 = wheels.get(1);
+
+                // Use the helper to calculate the exact controller position
+                BlockPos controllerPos = CrushingWheelPairHelper.getControllerPosition(wheel1, wheel2);
+                activeControllerPositions.add(controllerPos);
+            }
+        }
+
+        CrushingWheelRecipeSelector.LOGGER.debug("Rebuilt controller cache: {} active controller(s)",
+                activeControllerPositions.size());
     }
 
     // ==================== LINKING ====================
@@ -44,23 +104,12 @@ public class CrushingWheelSelections extends SavedData {
     public void linkWheel(BlockPos pos, UUID groupId) {
         wheelGroups.put(pos, groupId);
         groupPreferences.computeIfAbsent(groupId, k -> new HashMap<>());
-        setDirty();
-        CrushingWheelRecipeSelector.LOGGER.debug("Linked wheel at {} to group {}", pos, groupId);
-    }
 
-    /**
-     * Unlink a wheel (internal method, doesn't affect pair)
-     */
-    private void unlinkWheelInternal(BlockPos pos) {
-        UUID groupId = wheelGroups.remove(pos);
-        if (groupId != null) {
-            // Check if any other wheels still use this group
-            boolean groupStillUsed = wheelGroups.containsValue(groupId);
-            if (!groupStillUsed) {
-                groupPreferences.remove(groupId);
-            }
-            setDirty();
-        }
+        // Rebuild cache after linking
+        rebuildControllerCache();
+        setDirty();
+
+        CrushingWheelRecipeSelector.LOGGER.debug("Linked wheel at {} to group {}", pos, groupId);
     }
 
     /**
@@ -86,9 +135,12 @@ public class CrushingWheelSelections extends SavedData {
 
             // Remove the group's preferences
             groupPreferences.remove(groupId);
+
+            // Rebuild cache after unlinking
+            rebuildControllerCache();
             setDirty();
 
-            CrushingWheelRecipeSelector.LOGGER.info("Dissolved group {} - {} wheel(s) unlinked", groupId, wheelsInGroup.size());
+            CrushingWheelRecipeSelector.LOGGER.debug("Dissolved group {} - {} wheel(s) unlinked", groupId, wheelsInGroup.size());
         }
     }
 
@@ -212,6 +264,12 @@ public class CrushingWheelSelections extends SavedData {
             data.groupPreferences.put(groupId, prefs);
         }
 
+        // Rebuild controller cache after loading
+        data.rebuildControllerCache();
+
+        CrushingWheelRecipeSelector.LOGGER.info("Loaded {} wheel groups, {} group preferences, {} active controllers",
+                data.wheelGroups.size(), data.groupPreferences.size(), data.activeControllerPositions.size());
+
         return data;
     }
 
@@ -247,6 +305,8 @@ public class CrushingWheelSelections extends SavedData {
             prefsList.add(groupTag);
         }
         tag.put("groupPreferences", prefsList);
+
+        // Note: activeControllerPositions is NOT saved - it's rebuilt on load
 
         return tag;
     }

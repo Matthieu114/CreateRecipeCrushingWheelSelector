@@ -139,9 +139,11 @@ public class WrenchHandler {
         CrushingWheelRecipeSelector.LOGGER.debug("Player {} started linking at {}", player.getName().getString(), pos);
 
         // Send packet to client to start highlighting
+        // Include both valid targets (green) and invalid targets (red)
         if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
-            Set<BlockPos> nearbyWheels = WheelLinkingHelper.findNearbyWheels(level, pos);
-            PacketDistributor.sendToPlayer(serverPlayer, new StartLinkingPacket(pos, nearbyWheels));
+            Set<BlockPos> validTargets = WheelLinkingHelper.findValidLinkTargets(level, pos);
+            Set<BlockPos> invalidTargets = WheelLinkingHelper.findInvalidLinkTargets(level, pos, validTargets);
+            PacketDistributor.sendToPlayer(serverPlayer, new StartLinkingPacket(pos, validTargets, invalidTargets));
         }
     }
 
@@ -157,15 +159,16 @@ public class WrenchHandler {
     }
 
     private static void tryCompleteLink(Player player, BlockPos firstPos, BlockPos secondPos, Level level, CrushingWheelSelections selections) {
-        // Check distance
-        if (!WheelLinkingHelper.isWithinLinkDistance(firstPos, secondPos)) {
-            // Too far apart - cancel linking
-            pendingLinks.remove(player.getUUID());
+        // Use the smarter validation that checks axis alignment
+        if (!WheelLinkingHelper.canLink(level, firstPos, secondPos)) {
+            // Get the specific reason for failure
+            String reason = WheelLinkingHelper.getLinkFailureReason(level, firstPos, secondPos);
 
-            String distance = WheelLinkingHelper.getDistanceDescription(firstPos, secondPos);
-            player.displayClientMessage(Component.literal("§cWheels are too far apart! (" + distance + ") Maximum distance is " + WheelLinkingHelper.MAX_LINK_DISTANCE + " blocks."), true);
-            CrushingWheelRecipeSelector.LOGGER.debug("Player {} tried to link wheels that are too far apart: {} to {} ({})",
-                    player.getName().getString(), firstPos, secondPos, distance);
+            pendingLinks.remove(player.getUUID());
+            player.displayClientMessage(Component.literal("§cCannot link: " + reason), true);
+
+            CrushingWheelRecipeSelector.LOGGER.debug("Player {} failed to link wheels: {}",
+                    player.getName().getString(), reason);
 
             // Send error particles and clear highlighting
             if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
@@ -175,7 +178,7 @@ public class WrenchHandler {
             return;
         }
 
-        // Distance OK - complete the link
+        // Validation passed - complete the link
         completeLink(player, firstPos, secondPos, level, selections);
     }
 

@@ -13,12 +13,13 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Sent from server to client when player starts linking process
- * Contains the selected wheel position and all nearby wheel positions
+ * Sent from server to client when player starts linking process.
+ * Contains the selected wheel position, valid targets (green), and invalid targets (red).
  */
 public record StartLinkingPacket(
         BlockPos selectedWheel,
-        Set<BlockPos> nearbyWheels
+        Set<BlockPos> validTargets,
+        Set<BlockPos> invalidTargets
 ) implements CustomPacketPayload {
 
     public static final CustomPacketPayload.Type<StartLinkingPacket> TYPE =
@@ -29,20 +30,38 @@ public record StartLinkingPacket(
 
     public static void write(FriendlyByteBuf buf, StartLinkingPacket packet) {
         buf.writeBlockPos(packet.selectedWheel);
-        buf.writeInt(packet.nearbyWheels.size());
-        for (BlockPos pos : packet.nearbyWheels) {
+
+        // Write valid targets
+        buf.writeInt(packet.validTargets.size());
+        for (BlockPos pos : packet.validTargets) {
+            buf.writeBlockPos(pos);
+        }
+
+        // Write invalid targets
+        buf.writeInt(packet.invalidTargets.size());
+        for (BlockPos pos : packet.invalidTargets) {
             buf.writeBlockPos(pos);
         }
     }
 
     public static StartLinkingPacket read(FriendlyByteBuf buf) {
         BlockPos selected = buf.readBlockPos();
-        int count = buf.readInt();
-        Set<BlockPos> nearby = new HashSet<>();
-        for (int i = 0; i < count; i++) {
-            nearby.add(buf.readBlockPos());
+
+        // Read valid targets
+        int validCount = buf.readInt();
+        Set<BlockPos> valid = new HashSet<>(validCount);
+        for (int i = 0; i < validCount; i++) {
+            valid.add(buf.readBlockPos());
         }
-        return new StartLinkingPacket(selected, nearby);
+
+        // Read invalid targets
+        int invalidCount = buf.readInt();
+        Set<BlockPos> invalid = new HashSet<>(invalidCount);
+        for (int i = 0; i < invalidCount; i++) {
+            invalid.add(buf.readBlockPos());
+        }
+
+        return new StartLinkingPacket(selected, valid, invalid);
     }
 
     @Override
@@ -52,8 +71,12 @@ public record StartLinkingPacket(
 
     public static void handle(StartLinkingPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
-            // Client-side: Start highlighting
-            WheelHighlightRenderer.setSelectedWheel(packet.selectedWheel(), packet.nearbyWheels());
+            // Client-side: Start highlighting with both valid and invalid targets
+            WheelHighlightRenderer.setSelectedWheel(
+                    packet.selectedWheel(),
+                    packet.validTargets(),
+                    packet.invalidTargets()
+            );
         });
     }
 }
