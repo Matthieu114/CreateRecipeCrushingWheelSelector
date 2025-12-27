@@ -125,12 +125,26 @@ public class WrenchHandler {
     }
 
     private static void tryCompleteLink(Player player, BlockPos firstPos, BlockPos secondPos, Level level, CrushingWheelSelections selections) {
+        // Check if second wheel is already linked to another wheel
+        if (selections != null && selections.isWheelLinked(secondPos)) {
+            pendingLinks.remove(player.getUUID());
+            player.displayClientMessage(Component.literal("§cCannot link: That wheel is already linked to another wheel"), true);
+
+            CrushingWheelRecipeSelector.LOGGER.debug("Player {} failed to link wheels: second wheel already linked",
+                    player.getName().getString());
+
+            if (player instanceof ServerPlayer serverPlayer) {
+                ModNetworking.sendToPlayer(serverPlayer, new LinkResultPacket(false, secondPos, secondPos));
+            }
+            return;
+        }
+
         if (!WheelLinkingHelper.canLink(level, firstPos, secondPos)) {
             String reason = WheelLinkingHelper.getLinkFailureReason(level, firstPos, secondPos);
-            
+
             pendingLinks.remove(player.getUUID());
             player.displayClientMessage(Component.literal("§cCannot link: " + reason), true);
-            
+
             CrushingWheelRecipeSelector.LOGGER.debug("Player {} failed to link wheels: {}",
                     player.getName().getString(), reason);
 

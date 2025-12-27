@@ -61,6 +61,10 @@ public class ClientSelectionCache {
         return wheelSelections != null ? wheelSelections.get(inputItemId) : null;
     }
 
+    public static boolean hasSelection(BlockPos wheelPos, String inputItemId) {
+        return getSelection(wheelPos, inputItemId) != null;
+    }
+
     public static void clear() {
         currentWheelPos = null;
         selections.clear();

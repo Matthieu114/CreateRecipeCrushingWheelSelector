@@ -1,9 +1,7 @@
 package com.enormeboze.crushingwheelrecipeselector.client;
 
+import com.enormeboze.crushingwheelrecipeselector.CrushingWheelRecipeSelector;
 import com.enormeboze.crushingwheelrecipeselector.RecipeHandler;
-import com.enormeboze.crushingwheelrecipeselector.network.ClearRecipePacket;
-import com.enormeboze.crushingwheelrecipeselector.network.ModNetworking;
-import com.enormeboze.crushingwheelrecipeselector.network.SelectRecipePacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -15,15 +13,15 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * GUI screen for selecting preferred crushing wheel recipes.
- * Uses RecipeHandler to get conflicting recipes instead of Create's RecipeFinder.
+ * Uses a grid layout to display items with conflicting recipes.
  */
 @OnlyIn(Dist.CLIENT)
 public class RecipeSelectorScreen extends Screen {
@@ -31,61 +29,68 @@ public class RecipeSelectorScreen extends Screen {
     private static final int PANEL_COLOR = 0xFFC6C6C6;
     private static final int BORDER_LIGHT = 0xFFFFFFFF;
     private static final int BORDER_DARK = 0xFF555555;
-    private static final int ITEM_BG = 0xFFB8B8B8;
-    private static final int ITEM_SELECTED = 0xFFAAEEAA;
-    private static final int ITEM_HOVER = 0xFFD0D0D0;
     private static final int SLOT_BG = 0xFF8B8B8B;
     private static final int TEXT_COLOR = 0xFF404040;
+    private static final int HOVER_OVERLAY = 0x80FFFFFF;
+    private static final int SELECTED_TINT = 0x4000FF00;
 
-    private static final int PANEL_WIDTH = 200;
-    private static final int PANEL_HEIGHT = 220;
-    private static final int ITEM_HEIGHT = 36;
-    private static final int ITEM_SPACING = 4;
-    private static final int SLOT_SIZE = 18;
+    private static final int ITEM_SLOT_SIZE = 18;
+    private static final int SLOT_SPACING = 20;
+    private static final int SLOTS_PER_ROW = 7;
 
-    private final BlockPos wheelPos;
-    private final Map<String, List<RecipeHandler.RecipeConflict>> recipesByInput = new HashMap<>();
-    private final Map<String, ResourceLocation> currentSelections;
-    private final List<String> inputItemIds = new ArrayList<>();
+    private static final int PANEL_WIDTH = 176;
+    private static final int PANEL_HEIGHT = 166;
 
+    private final BlockPos wheelPosition;
+    private List<ItemEntry> conflictingItems;
     private int scrollOffset = 0;
     private int maxScroll = 0;
 
-    public RecipeSelectorScreen(BlockPos wheelPos) {
-        super(Component.literal("Crushing Wheel Recipe Selector"));
-        this.wheelPos = wheelPos;
-        this.currentSelections = new HashMap<>(ClientSelectionCache.getCurrentSelections());
-        loadRecipes();
-    }
-
-    private void loadRecipes() {
-        // Use RecipeHandler's cached conflicting recipes
-        Map<String, List<RecipeHandler.RecipeConflict>> conflicts = RecipeHandler.getConflictingRecipes();
-
-        recipesByInput.clear();
-        inputItemIds.clear();
-
-        for (Map.Entry<String, List<RecipeHandler.RecipeConflict>> entry : conflicts.entrySet()) {
-            if (entry.getValue().size() > 1) {
-                recipesByInput.put(entry.getKey(), entry.getValue());
-                inputItemIds.add(entry.getKey());
-            }
-        }
+    public RecipeSelectorScreen(BlockPos wheelPosition) {
+        super(Component.literal("Crushing Recipes"));
+        this.wheelPosition = wheelPosition;
+        this.conflictingItems = new ArrayList<>();
     }
 
     @Override
     protected void init() {
         super.init();
+        loadConflictingItems();
 
         int panelX = (this.width - PANEL_WIDTH) / 2;
         int panelY = (this.height - PANEL_HEIGHT) / 2;
 
-        // Close button
         this.addRenderableWidget(
-                Button.builder(Component.literal("Close"), b -> onClose())
+                Button.builder(Component.literal("Done"), button -> this.onClose())
                         .bounds(panelX + PANEL_WIDTH / 2 - 30, panelY + PANEL_HEIGHT - 24, 60, 20)
                         .build()
         );
+    }
+
+    private void loadConflictingItems() {
+        conflictingItems.clear();
+        Map<String, List<RecipeHandler.RecipeConflict>> conflicts = RecipeHandler.getConflictingRecipes();
+
+        for (Map.Entry<String, List<RecipeHandler.RecipeConflict>> entry : conflicts.entrySet()) {
+            String itemId = entry.getKey();
+            int conflictCount = entry.getValue().size();
+            ItemStack itemStack = getItemStackFromId(itemId);
+            boolean hasSelection = ClientSelectionCache.hasSelection(wheelPosition, itemId);
+            conflictingItems.add(new ItemEntry(itemId, itemStack, conflictCount, hasSelection));
+        }
+    }
+
+    private ItemStack getItemStackFromId(String itemId) {
+        try {
+            ResourceLocation location = new ResourceLocation(itemId);
+            var item = ForgeRegistries.ITEMS.getValue(location);
+            if (item != null && item != Items.AIR) {
+                return new ItemStack(item);
+            }
+        } catch (Exception e) {
+            CrushingWheelRecipeSelector.LOGGER.error("Failed to get item for ID: {}", itemId, e);
+        }
+        return new ItemStack(Items.BARRIER);
     }
 
     @Override
@@ -99,22 +104,27 @@ public class RecipeSelectorScreen extends Screen {
         drawPanel(graphics, panelX, panelY, PANEL_WIDTH, PANEL_HEIGHT);
 
         // Title
-        String title = "Select Input Item";
+        String title = "Crushing Recipes";
         int titleX = panelX + PANEL_WIDTH / 2 - this.font.width(title) / 2;
-        graphics.drawString(this.font, title, titleX, panelY + 6, TEXT_COLOR, false);
+        int titleY = panelY + 6;
+        graphics.drawString(this.font, title, titleX, titleY, TEXT_COLOR, false);
 
-        if (recipesByInput.isEmpty()) {
-            graphics.drawCenteredString(this.font, "No recipe conflicts found!",
-                    this.width / 2, this.height / 2, 0xAAAAAA);
+        if (conflictingItems.isEmpty()) {
+            String noConflicts = "No conflicts found";
+            graphics.drawString(this.font, noConflicts, panelX + PANEL_WIDTH / 2 - this.font.width(noConflicts) / 2,
+                    panelY + PANEL_HEIGHT / 2, 0xFF666666, false);
         } else {
-            renderItemList(graphics, mouseX, mouseY, panelX, panelY);
+            renderItemGrid(graphics, mouseX, mouseY, panelX, panelY);
         }
 
         super.render(graphics, mouseX, mouseY, partialTick);
+
+        // Tooltips rendered last (on top of everything)
+        renderTooltips(graphics, mouseX, mouseY, panelX, panelY);
     }
 
     private void drawPanel(GuiGraphics graphics, int x, int y, int width, int height) {
-        // Main fill with rounded corners
+        // Main fill
         graphics.fill(x + 2, y + 2, x + width - 2, y + height - 2, PANEL_COLOR);
         graphics.fill(x + 3, y + 1, x + width - 3, y + height - 1, PANEL_COLOR);
         graphics.fill(x + 1, y + 3, x + width - 1, y + height - 3, PANEL_COLOR);
@@ -138,94 +148,66 @@ public class RecipeSelectorScreen extends Screen {
         graphics.fill(x + width - 3, y + 2, x + width - 2, y + 3, BORDER_LIGHT);
     }
 
-    private void drawItemBox(GuiGraphics graphics, int x, int y, int width, int height, boolean selected, boolean hovered) {
-        int bgColor = selected ? ITEM_SELECTED : (hovered ? ITEM_HOVER : ITEM_BG);
+    private void drawSlot(GuiGraphics graphics, int x, int y, int size, boolean hovered, boolean selected) {
+        graphics.fill(x, y, x + size, y + size, SLOT_BG);
+        // Inset border
+        graphics.fill(x, y, x + size - 1, y + 1, BORDER_DARK);
+        graphics.fill(x, y, x + 1, y + size - 1, BORDER_DARK);
+        graphics.fill(x + 1, y + size - 1, x + size, y + size, BORDER_LIGHT);
+        graphics.fill(x + size - 1, y + 1, x + size, y + size, BORDER_LIGHT);
 
-        // Main fill with rounded corners
-        graphics.fill(x + 2, y + 2, x + width - 2, y + height - 2, bgColor);
-        graphics.fill(x + 3, y + 1, x + width - 3, y + height - 1, bgColor);
-        graphics.fill(x + 1, y + 3, x + width - 1, y + height - 3, bgColor);
-
-        int borderColor = selected ? 0xFF00AA00 : BORDER_DARK;
-
-        // Border
-        graphics.fill(x + 3, y, x + width - 3, y + 1, borderColor);
-        graphics.fill(x + 1, y + 1, x + 3, y + 2, borderColor);
-        graphics.fill(x + 1, y + 2, x + 2, y + 3, borderColor);
-        graphics.fill(x, y + 3, x + 1, y + height - 3, borderColor);
-        graphics.fill(x + 3, y + height - 1, x + width - 3, y + height, borderColor);
-        graphics.fill(x + width - 3, y + height - 2, x + width - 1, y + height - 1, borderColor);
-        graphics.fill(x + width - 2, y + height - 3, x + width - 1, y + height - 2, borderColor);
-        graphics.fill(x + width - 1, y + 3, x + width, y + height - 3, borderColor);
-        graphics.fill(x + 1, y + height - 3, x + 2, y + height - 2, borderColor);
-        graphics.fill(x + 2, y + height - 2, x + 3, y + height - 1, borderColor);
-        graphics.fill(x + width - 2, y + 1, x + width - 1, y + 2, borderColor);
-        graphics.fill(x + width - 3, y + 2, x + width - 2, y + 3, borderColor);
+        if (hovered) {
+            graphics.fill(x + 1, y + 1, x + size - 1, y + size - 1, HOVER_OVERLAY);
+        }
+        if (selected) {
+            graphics.fill(x + 1, y + 1, x + size - 1, y + size - 1, SELECTED_TINT);
+        }
     }
 
-    private void drawItemSlot(GuiGraphics graphics, int x, int y) {
-        graphics.fill(x + 1, y, x + SLOT_SIZE - 1, y + SLOT_SIZE, SLOT_BG);
-        graphics.fill(x, y + 1, x + SLOT_SIZE, y + SLOT_SIZE - 1, SLOT_BG);
+    private void renderItemGrid(GuiGraphics graphics, int mouseX, int mouseY, int panelX, int panelY) {
+        int gridStartY = panelY + 20;
+        int gridHeight = PANEL_HEIGHT - 50;
 
-        graphics.fill(x + 1, y, x + SLOT_SIZE - 1, y + 1, BORDER_DARK);
-        graphics.fill(x, y + 1, x + 1, y + SLOT_SIZE - 1, BORDER_DARK);
-        graphics.fill(x + 1, y + SLOT_SIZE - 1, x + SLOT_SIZE - 1, y + SLOT_SIZE, BORDER_LIGHT);
-        graphics.fill(x + SLOT_SIZE - 1, y + 1, x + SLOT_SIZE, y + SLOT_SIZE - 1, BORDER_LIGHT);
-    }
+        int totalGridWidth = SLOTS_PER_ROW * SLOT_SPACING;
+        int startX = panelX + (PANEL_WIDTH - totalGridWidth) / 2;
 
-    private void renderItemList(GuiGraphics graphics, int mouseX, int mouseY, int panelX, int panelY) {
-        int listStartY = panelY + 22;
-        int listHeight = PANEL_HEIGHT - 52;
-        int itemWidth = PANEL_WIDTH - 20;
-        int itemX = panelX + 10;
-
-        int contentHeight = inputItemIds.size() * (ITEM_HEIGHT + ITEM_SPACING);
-        maxScroll = Math.max(0, contentHeight - listHeight);
+        int rows = (conflictingItems.size() + SLOTS_PER_ROW - 1) / SLOTS_PER_ROW;
+        int contentHeight = rows * SLOT_SPACING;
+        maxScroll = Math.max(0, contentHeight - gridHeight);
         scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
 
-        graphics.enableScissor(panelX + 5, listStartY, panelX + PANEL_WIDTH - 5, listStartY + listHeight);
+        graphics.enableScissor(panelX + 5, gridStartY, panelX + PANEL_WIDTH - 5, gridStartY + gridHeight);
 
-        for (int i = 0; i < inputItemIds.size(); i++) {
-            String inputItemId = inputItemIds.get(i);
-            int boxY = listStartY + i * (ITEM_HEIGHT + ITEM_SPACING) - scrollOffset;
+        int index = 0;
+        for (ItemEntry entry : conflictingItems) {
+            int row = index / SLOTS_PER_ROW;
+            int col = index % SLOTS_PER_ROW;
 
-            if (boxY + ITEM_HEIGHT < listStartY || boxY > listStartY + listHeight) continue;
+            int x = startX + col * SLOT_SPACING;
+            int y = gridStartY + row * SLOT_SPACING - scrollOffset;
 
-            boolean hasSelection = currentSelections.containsKey(inputItemId);
-            boolean isHovered = mouseX >= itemX && mouseX < itemX + itemWidth &&
-                    mouseY >= boxY && mouseY < boxY + ITEM_HEIGHT &&
-                    mouseY >= listStartY && mouseY <= listStartY + listHeight;
+            if (y + ITEM_SLOT_SIZE < gridStartY || y > gridStartY + gridHeight) {
+                index++;
+                continue;
+            }
 
-            drawItemBox(graphics, itemX, boxY, itemWidth, ITEM_HEIGHT, hasSelection, isHovered);
+            boolean isHovered = mouseX >= x && mouseX < x + ITEM_SLOT_SIZE &&
+                    mouseY >= y && mouseY < y + ITEM_SLOT_SIZE &&
+                    mouseY >= gridStartY && mouseY <= gridStartY + gridHeight;
 
-            // Item slot
-            int slotX = itemX + 6;
-            int slotY = boxY + (ITEM_HEIGHT - SLOT_SIZE) / 2;
-            drawItemSlot(graphics, slotX, slotY);
+            drawSlot(graphics, x, y, ITEM_SLOT_SIZE, isHovered, entry.hasSelection);
 
             // Render item
-            ItemStack inputStack = getItemStackFromId(inputItemId);
-            graphics.renderItem(inputStack, slotX + 1, slotY + 1);
+            graphics.renderItem(entry.itemStack, x + 1, y + 1);
 
-            // Item name
-            String displayName = inputStack.getHoverName().getString();
-            if (displayName.length() > 18) {
-                displayName = displayName.substring(0, 16) + "..";
-            }
-            graphics.drawString(this.font, displayName, slotX + SLOT_SIZE + 6, boxY + 6, TEXT_COLOR, false);
-
-            // Recipe count
-            List<RecipeHandler.RecipeConflict> recipes = recipesByInput.get(inputItemId);
-            int recipeCount = recipes != null ? recipes.size() : 0;
-            graphics.drawString(this.font, recipeCount + " recipes", slotX + SLOT_SIZE + 6, boxY + 18, 0xFF888888, false);
-
-            // Checkmark if selection exists
-            if (hasSelection) {
-                graphics.drawString(this.font, "\u2714", itemX + itemWidth - 14, boxY + 6, 0xFF00DD00, false);
+            // Render count using renderItemDecorations which handles z-ordering correctly
+            if (entry.conflictCount > 1) {
+                ItemStack fakeStack = entry.itemStack.copy();
+                fakeStack.setCount(entry.conflictCount);
+                graphics.renderItemDecorations(this.font, fakeStack, x + 1, y + 1);
             }
 
-            // Arrow indicator
-            graphics.drawString(this.font, "\u25B6", itemX + itemWidth - 14, boxY + 18, 0xFF666666, false);
+            index++;
         }
 
         graphics.disableScissor();
@@ -233,26 +215,45 @@ public class RecipeSelectorScreen extends Screen {
         // Scrollbar
         if (maxScroll > 0) {
             int scrollbarX = panelX + PANEL_WIDTH - 8;
-            int scrollbarY = listStartY;
-            graphics.fill(scrollbarX, scrollbarY, scrollbarX + 4, scrollbarY + listHeight, 0xFF555555);
+            int scrollbarY = gridStartY;
+            graphics.fill(scrollbarX, scrollbarY, scrollbarX + 4, scrollbarY + gridHeight, 0xFF555555);
 
-            int thumbHeight = Math.max(20, (int) ((float) listHeight / (float) contentHeight * listHeight));
-            int thumbY = scrollbarY + (int) ((float) scrollOffset / (float) maxScroll * (listHeight - thumbHeight));
+            int thumbHeight = Math.max(20, (int) ((float) gridHeight / (float) contentHeight * gridHeight));
+            int thumbY = scrollbarY + (int) ((float) scrollOffset / (float) maxScroll * (gridHeight - thumbHeight));
             graphics.fill(scrollbarX, thumbY, scrollbarX + 4, thumbY + thumbHeight, 0xFFAAAAAA);
         }
     }
 
-    private ItemStack getItemStackFromId(String itemId) {
-        try {
-            ResourceLocation location = new ResourceLocation(itemId);
-            var item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(location);
-            if (item != null && item != Items.AIR) {
-                return new ItemStack(item);
+    private void renderTooltips(GuiGraphics graphics, int mouseX, int mouseY, int panelX, int panelY) {
+        int gridStartY = panelY + 20;
+        int gridHeight = PANEL_HEIGHT - 50;
+        int totalGridWidth = SLOTS_PER_ROW * SLOT_SPACING;
+        int startX = panelX + (PANEL_WIDTH - totalGridWidth) / 2;
+
+        int index = 0;
+        for (ItemEntry entry : conflictingItems) {
+            int row = index / SLOTS_PER_ROW;
+            int col = index % SLOTS_PER_ROW;
+
+            int x = startX + col * SLOT_SPACING;
+            int y = gridStartY + row * SLOT_SPACING - scrollOffset;
+
+            if (y + ITEM_SLOT_SIZE < gridStartY || y > gridStartY + gridHeight) {
+                index++;
+                continue;
             }
-        } catch (Exception e) {
-            // Ignore
+
+            boolean isHovered = mouseX >= x && mouseX < x + ITEM_SLOT_SIZE &&
+                    mouseY >= y && mouseY < y + ITEM_SLOT_SIZE &&
+                    mouseY >= gridStartY && mouseY <= gridStartY + gridHeight;
+
+            if (isHovered) {
+                graphics.renderTooltip(this.font, entry.itemStack, mouseX, mouseY);
+                break;
+            }
+
+            index++;
         }
-        return ItemStack.EMPTY;
     }
 
     @Override
@@ -265,38 +266,48 @@ public class RecipeSelectorScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0) {
-            int panelX = (this.width - PANEL_WIDTH) / 2;
-            int panelY = (this.height - PANEL_HEIGHT) / 2;
-            int listStartY = panelY + 22;
-            int listHeight = PANEL_HEIGHT - 52;
-            int itemWidth = PANEL_WIDTH - 20;
-            int itemX = panelX + 10;
-
-            for (int i = 0; i < inputItemIds.size(); i++) {
-                String inputItemId = inputItemIds.get(i);
-                int boxY = listStartY + i * (ITEM_HEIGHT + ITEM_SPACING) - scrollOffset;
-
-                if (boxY + ITEM_HEIGHT < listStartY || boxY > listStartY + listHeight) continue;
-
-                if (mouseX >= itemX && mouseX < itemX + itemWidth &&
-                        mouseY >= boxY && mouseY < boxY + ITEM_HEIGHT &&
-                        mouseY >= listStartY && mouseY <= listStartY + listHeight) {
-                    openDetailScreen(inputItemId);
-                    return true;
-                }
+            int clickedIndex = getClickedItemIndex((int) mouseX, (int) mouseY);
+            if (clickedIndex >= 0 && clickedIndex < conflictingItems.size()) {
+                ItemEntry entry = conflictingItems.get(clickedIndex);
+                openRecipeDetailScreen(entry);
+                return true;
             }
         }
         return super.mouseClicked(mouseX, mouseY, button);
     }
 
-    private void openDetailScreen(String inputItemId) {
-        List<RecipeHandler.RecipeConflict> recipes = recipesByInput.get(inputItemId);
-        if (recipes != null && !recipes.isEmpty()) {
-            ItemStack inputStack = getItemStackFromId(inputItemId);
-            Minecraft.getInstance().setScreen(new RecipeDetailScreen(
-                    this, wheelPos, inputItemId, inputStack, recipes
-            ));
+    private int getClickedItemIndex(int mouseX, int mouseY) {
+        int panelX = (this.width - PANEL_WIDTH) / 2;
+        int panelY = (this.height - PANEL_HEIGHT) / 2;
+        int gridStartY = panelY + 20;
+        int gridHeight = PANEL_HEIGHT - 50;
+
+        int totalGridWidth = SLOTS_PER_ROW * SLOT_SPACING;
+        int startX = panelX + (PANEL_WIDTH - totalGridWidth) / 2;
+
+        for (int i = 0; i < conflictingItems.size(); i++) {
+            int row = i / SLOTS_PER_ROW;
+            int col = i % SLOTS_PER_ROW;
+
+            int x = startX + col * SLOT_SPACING;
+            int y = gridStartY + row * SLOT_SPACING - scrollOffset;
+
+            if (y + ITEM_SLOT_SIZE < gridStartY || y > gridStartY + gridHeight) continue;
+
+            if (mouseX >= x && mouseX < x + ITEM_SLOT_SIZE &&
+                    mouseY >= y && mouseY < y + ITEM_SLOT_SIZE &&
+                    mouseY >= gridStartY && mouseY <= gridStartY + gridHeight) {
+                return i;
+            }
         }
+        return -1;
+    }
+
+    private void openRecipeDetailScreen(ItemEntry entry) {
+        List<RecipeHandler.RecipeConflict> recipes = RecipeHandler.getConflictsForItem(entry.itemId);
+        Minecraft.getInstance().setScreen(
+                new RecipeDetailScreen(this, wheelPosition, entry.itemId, entry.itemStack, recipes)
+        );
     }
 
     @Override
@@ -307,5 +318,19 @@ public class RecipeSelectorScreen extends Screen {
     @Override
     public void renderBackground(GuiGraphics graphics) {
         // Empty - we draw our own background
+    }
+
+    private static class ItemEntry {
+        final String itemId;
+        final ItemStack itemStack;
+        final int conflictCount;
+        final boolean hasSelection;
+
+        ItemEntry(String itemId, ItemStack itemStack, int conflictCount, boolean hasSelection) {
+            this.itemId = itemId;
+            this.itemStack = itemStack;
+            this.conflictCount = conflictCount;
+            this.hasSelection = hasSelection;
+        }
     }
 }
